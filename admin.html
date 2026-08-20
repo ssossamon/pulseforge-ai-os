@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PulseForge AI OS — Admin</title>
+<link rel="stylesheet" href="/shared.css">
+</head>
+<body>
+
+<div id="loadingGate" style="min-height:100vh; display:flex; align-items:center; justify-content:center; color:var(--muted);">Loading…</div>
+
+<div id="app" class="hidden">
+  <aside>
+    <div class="brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M2 12h4l2-7 4 14 3-9 2 4h5" stroke="#E8A33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      PulseForge <span style="color:var(--gold); font-size:.7rem; margin-left:4px; align-self:center;">ADMIN</span>
+    </div>
+    <div class="user-row">
+      <div id="userEmail"></div>
+      <span class="logout-link" id="logoutLink">Sign out</span>
+      <span> · </span>
+      <a class="logout-link" href="/app.html">Back to app</a>
+    </div>
+    <nav class="side">
+      <button data-view="overview" class="active">Overview</button>
+      <button data-view="keygen">Keygen</button>
+      <button data-view="users">Users</button>
+      <button data-view="crm">CRM / Leads</button>
+    </nav>
+  </aside>
+
+  <main>
+
+    <!-- OVERVIEW -->
+    <section class="view active" id="view-overview">
+      <div class="view-head"><h2>System overview</h2><p>Real, live checks — not simulated. Refresh any time.</p></div>
+      <div class="panel">
+        <div id="statusList">Loading…</div>
+        <button class="btn btn-line" id="refreshStatusBtn" style="margin-top:14px;">Refresh</button>
+      </div>
+    </section>
+
+    <!-- KEYGEN -->
+    <section class="view" id="view-keygen">
+      <div class="view-head"><h2>License keygen</h2><p>Generate real, server-verified license keys. Buyers redeem them in the app's License tab.</p></div>
+      <div class="panel">
+        <div class="row">
+          <div class="field">
+            <label>Tier</label>
+            <select id="keyTier">
+              <option value="starter">Starter — 20 campaigns, 5/day, all modules</option>
+              <option value="enterprise">Enterprise — unlimited, all modules</option>
+            </select>
+          </div>
+          <div class="field"><label>How many</label><input type="number" id="keyCount" value="1" min="1" max="100"></div>
+        </div>
+        <button class="btn btn-gold" id="generateKeysBtn">Generate</button>
+        <div class="msg" id="keygenMsg"></div>
+        <div id="generatedKeys" style="margin-top:14px;"></div>
+      </div>
+      <div class="panel">
+        <h3 style="font-size:1rem;">All keys</h3>
+        <table>
+          <thead><tr><th>Key</th><th>Tier</th><th>Status</th><th>Redeemed by</th><th>Created</th></tr></thead>
+          <tbody id="keysBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- USERS -->
+    <section class="view" id="view-users">
+      <div class="view-head"><h2>Users</h2><p>Every account, with a manual override for tier or admin access.</p></div>
+      <div class="panel">
+        <table>
+          <thead><tr><th>Email</th><th>Name</th><th>Tier</th><th>Admin</th><th>Campaigns</th><th>Joined</th><th></th></tr></thead>
+          <tbody id="usersBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- CRM -->
+    <section class="view" id="view-crm">
+      <div class="view-head"><h2>CRM / Leads</h2><p>Every email captured from the landing page and in-app forms.</p></div>
+      <div class="panel">
+        <button class="btn btn-line" id="resyncBtn">Resync unsynced leads to Kit</button>
+        <div class="msg" id="resyncMsg"></div>
+        <table style="margin-top:14px;">
+          <thead><tr><th>Email</th><th>Name</th><th>Source</th><th>Tag</th><th>Kit synced</th><th>Captured</th></tr></thead>
+          <tbody id="leadsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+const API = '/.netlify/functions/';
+function token() { return localStorage.getItem('pfai_token'); }
+function authHeaders() { return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() }; }
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function boot() {
+  if (!token()) { window.location.href = '/login.html'; return; }
+  try {
+    const res = await fetch(API + 'auth-me', { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) { localStorage.removeItem('pfai_token'); window.location.href = '/login.html'; return; }
+    if (!data.user.isAdmin) { window.location.href = '/app.html'; return; }
+    document.getElementById('userEmail').textContent = data.user.email;
+    document.getElementById('loadingGate').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    loadStatus();
+  } catch (err) {
+    document.getElementById('loadingGate').textContent = 'Could not reach the server. Refresh to try again.';
+  }
+}
+boot();
+
+document.getElementById('logoutLink').addEventListener('click', () => {
+  localStorage.removeItem('pfai_token'); localStorage.removeItem('pfai_user');
+  window.location.href = '/login.html';
+});
+
+document.querySelectorAll('nav.side button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav.side button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('view-' + btn.dataset.view).classList.add('active');
+    if (btn.dataset.view === 'keygen') loadKeys();
+    if (btn.dataset.view === 'users') loadUsers();
+    if (btn.dataset.view === 'crm') loadLeads();
+  });
+});
+
+// ---- Overview ----
+async function loadStatus() {
+  const wrap = document.getElementById('statusList');
+  wrap.innerHTML = 'Checking…';
+  try {
+    const res = await fetch(API + 'integrations-status', { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) { wrap.textContent = data.error; return; }
+    const rows = [
+      ['Database', data.status.database],
+      ['JWT sessions', data.status.jwt],
+      ['Kit (ConvertKit)', data.status.kit],
+      ['Owner auto-admin', data.status.ownerEmail],
+    ];
+    wrap.innerHTML = rows.map(([label, s]) => `
+      <div class="status-line" style="margin-bottom:10px;">
+        <span class="badge ${s.ok ? 'badge-ok' : 'badge-err'}">${s.ok ? 'OK' : 'NOT SET'}</span>
+        <b style="color:var(--paper); margin-right:4px;">${label}</b> — ${escapeHtml(s.detail)}
+      </div>`).join('');
+  } catch (err) {
+    wrap.textContent = 'Could not reach the server.';
+  }
+}
+document.getElementById('refreshStatusBtn').addEventListener('click', loadStatus);
+
+// ---- Keygen ----
+document.getElementById('generateKeysBtn').addEventListener('click', async () => {
+  const tier = document.getElementById('keyTier').value;
+  const count = document.getElementById('keyCount').value;
+  const msg = document.getElementById('keygenMsg');
+  msg.textContent = 'Generating…'; msg.className = 'msg';
+  try {
+    const res = await fetch(API + 'keys-generate', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ tier, count }) });
+    const data = await res.json();
+    if (!data.success) { msg.textContent = data.error; msg.className = 'msg err'; return; }
+    msg.textContent = `Generated ${data.keys.length} key(s).`; msg.className = 'msg ok';
+    document.getElementById('generatedKeys').innerHTML = `<div class="panel" style="background:var(--ink3);"><pre style="white-space:pre-wrap; font-family:ui-monospace,monospace; font-size:.85rem;">${data.keys.join('\n')}</pre></div>`;
+    loadKeys();
+  } catch (err) { msg.textContent = 'Could not reach the server.'; msg.className = 'msg err'; }
+});
+
+async function loadKeys() {
+  const body = document.getElementById('keysBody');
+  body.innerHTML = '<tr><td colspan="5">Loading…</td></tr>';
+  try {
+    const res = await fetch(API + 'keys-list', { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) { body.innerHTML = `<tr><td colspan="5">${escapeHtml(data.error)}</td></tr>`; return; }
+    body.innerHTML = data.keys.map(k => `
+      <tr>
+        <td class="mono">${escapeHtml(k.key_value)}</td>
+        <td><span class="badge badge-${k.tier}">${escapeHtml(k.tier)}</span></td>
+        <td><span class="badge ${k.status === 'unused' ? 'badge-ok' : 'badge-starter'}">${escapeHtml(k.status)}</span></td>
+        <td>${k.redeemed_by_email ? escapeHtml(k.redeemed_by_email) : '—'}</td>
+        <td>${new Date(k.created_at).toLocaleDateString()}</td>
+      </tr>`).join('') || '<tr><td colspan="5">No keys generated yet.</td></tr>';
+  } catch (err) { body.innerHTML = '<tr><td colspan="5">Could not reach the server.</td></tr>'; }
+}
+
+// ---- Users ----
+async function loadUsers() {
+  const body = document.getElementById('usersBody');
+  body.innerHTML = '<tr><td colspan="7">Loading…</td></tr>';
+  try {
+    const res = await fetch(API + 'admin-users', { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) { body.innerHTML = `<tr><td colspan="7">${escapeHtml(data.error)}</td></tr>`; return; }
+    body.innerHTML = data.users.map(u => `
+      <tr>
+        <td>${escapeHtml(u.email)}</td>
+        <td>${escapeHtml(u.name || '—')}</td>
+        <td>
+          <select data-user="${u.id}" class="tierSelect" style="background:var(--ink); color:var(--paper); border:1px solid var(--line); border-radius:3px; padding:4px;">
+            <option value="free" ${u.tier==='free'?'selected':''}>free</option>
+            <option value="starter" ${u.tier==='starter'?'selected':''}>starter</option>
+            <option value="enterprise" ${u.tier==='enterprise'?'selected':''}>enterprise</option>
+          </select>
+        </td>
+        <td><input type="checkbox" data-user="${u.id}" class="adminCheck" ${u.is_admin ? 'checked' : ''}></td>
+        <td>${u.campaign_count}</td>
+        <td>${new Date(u.created_at).toLocaleDateString()}</td>
+        <td><button class="copy-btn saveUserBtn" data-user="${u.id}">Save</button></td>
+      </tr>`).join('') || '<tr><td colspan="7">No users yet.</td></tr>';
+
+    document.querySelectorAll('.saveUserBtn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const userId = btn.dataset.user;
+        const tier = document.querySelector(`.tierSelect[data-user="${userId}"]`).value;
+        const isAdmin = document.querySelector(`.adminCheck[data-user="${userId}"]`).checked;
+        btn.textContent = 'Saving…';
+        try {
+          const res = await fetch(API + 'admin-users', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ userId, tier, isAdmin }) });
+          const data = await res.json();
+          btn.textContent = data.success ? 'Saved' : 'Error';
+        } catch { btn.textContent = 'Error'; }
+        setTimeout(() => { btn.textContent = 'Save'; }, 1500);
+      });
+    });
+  } catch (err) { body.innerHTML = '<tr><td colspan="7">Could not reach the server.</td></tr>'; }
+}
+
+// ---- CRM ----
+async function loadLeads() {
+  const body = document.getElementById('leadsBody');
+  body.innerHTML = '<tr><td colspan="6">Loading…</td></tr>';
+  try {
+    const res = await fetch(API + 'admin-leads', { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) { body.innerHTML = `<tr><td colspan="6">${escapeHtml(data.error)}</td></tr>`; return; }
+    body.innerHTML = data.leads.map(l => `
+      <tr>
+        <td>${escapeHtml(l.email)}</td>
+        <td>${escapeHtml(l.name || '—')}</td>
+        <td>${escapeHtml(l.source || '—')}</td>
+        <td>${escapeHtml(l.tag || '—')}</td>
+        <td><span class="badge ${l.synced_to_kit ? 'badge-ok' : 'badge-err'}">${l.synced_to_kit ? 'synced' : 'not synced'}</span></td>
+        <td>${new Date(l.created_at).toLocaleString()}</td>
+      </tr>`).join('') || '<tr><td colspan="6">No leads captured yet.</td></tr>';
+  } catch (err) { body.innerHTML = '<tr><td colspan="6">Could not reach the server.</td></tr>'; }
+}
+
+document.getElementById('resyncBtn').addEventListener('click', async () => {
+  const msg = document.getElementById('resyncMsg');
+  msg.textContent = 'Resyncing…'; msg.className = 'msg';
+  try {
+    const res = await fetch(API + 'admin-leads', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ action: 'resync' }) });
+    const data = await res.json();
+    if (!data.success) { msg.textContent = data.error; msg.className = 'msg err'; return; }
+    msg.textContent = `Attempted ${data.attempted}, succeeded ${data.succeeded}, failed ${data.failed}.`;
+    msg.className = 'msg ok';
+    loadLeads();
+  } catch (err) { msg.textContent = 'Could not reach the server.'; msg.className = 'msg err'; }
+});
+</script>
+</body>
+</html>

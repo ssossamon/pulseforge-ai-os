@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PulseForge AI OS — Campaign Builder</title>
+<link rel="stylesheet" href="/shared.css">
+</head>
+<body>
+
+<div id="loadingGate" style="min-height:100vh; display:flex; align-items:center; justify-content:center; color:var(--muted);">Loading…</div>
+
+<div id="app" class="hidden">
+  <aside>
+    <div class="brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M2 12h4l2-7 4 14 3-9 2 4h5" stroke="#E8A33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      PulseForge
+    </div>
+    <div class="user-row">
+      <div id="userEmail"></div>
+      <span class="logout-link" id="logoutLink">Sign out</span>
+      <span> · </span>
+      <a class="logout-link" id="adminLink" href="/admin.html" style="display:none;">Admin panel</a>
+    </div>
+    <nav class="side">
+      <button data-view="generate" class="active">Campaign builder</button>
+      <button data-view="history">Campaign history</button>
+      <button data-view="settings">AI settings</button>
+      <button data-view="license">License</button>
+    </nav>
+    <div class="plan-badge">
+      Plan: <b id="planLabel">Free</b><br>
+      <span id="usageLabel"></span>
+    </div>
+  </aside>
+
+  <main>
+
+    <!-- GENERATE -->
+    <section class="view active" id="view-generate">
+      <div class="view-head">
+        <h2>Build a campaign</h2>
+        <p>One offer becomes a full set of platform posts, hooks, CTAs, and email copy — generated live with your own AI key.</p>
+      </div>
+
+      <div class="panel">
+        <div class="row">
+          <div class="field"><label for="campName">Campaign name</label><input type="text" id="campName" placeholder="e.g. Skillet Spring Launch"></div>
+          <div class="field"><label for="campOffer">Offer / URL / product</label><input type="text" id="campOffer" placeholder="https://... or a product description"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label for="campAudience">Target audience</label><input type="text" id="campAudience" placeholder="e.g. home cooks who hate nonstick coatings"></div>
+          <div class="field"><label for="campBenefit">Main benefit</label><input type="text" id="campBenefit" placeholder="e.g. lifetime warranty, oven safe to 500°"></div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="toneSelect">Tone</label>
+            <select id="toneSelect">
+              <option value="direct">Direct &amp; benefit-driven</option>
+              <option value="playful">Playful &amp; conversational</option>
+              <option value="authority">Authority &amp; expert</option>
+              <option value="story">Storytelling</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Platforms</label>
+          <div class="chips" id="platformChips">
+            <label class="chip on" data-platform="x"><input type="checkbox" value="x" checked> X / Twitter</label>
+            <label class="chip on" data-platform="facebook"><input type="checkbox" value="facebook" checked> Facebook</label>
+            <label class="chip" data-platform="linkedin"><input type="checkbox" value="linkedin"> LinkedIn</label>
+            <label class="chip" data-platform="threads"><input type="checkbox" value="threads"> Threads</label>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Asset modules</label>
+          <div class="chips" id="moduleChips">
+            <label class="chip on" data-module="platform_post"><input type="checkbox" value="platform_post" checked> Platform posts</label>
+            <label class="chip on" data-module="email_promo"><input type="checkbox" value="email_promo" checked> Email promo</label>
+            <label class="chip" data-module="viral_hook"><input type="checkbox" value="viral_hook"> Viral hooks</label>
+            <label class="chip" data-module="cta"><input type="checkbox" value="cta"> CTA generator</label>
+            <label class="chip" data-module="video_hook"><input type="checkbox" value="video_hook"> Video hooks</label>
+          </div>
+        </div>
+
+        <button class="btn btn-gold" id="generateBtn" style="margin-top:16px;">Generate campaign</button>
+        <div class="status-line" id="genStatus"></div>
+      </div>
+
+      <div id="resultsWrap"></div>
+    </section>
+
+    <!-- HISTORY -->
+    <section class="view" id="view-history">
+      <div class="view-head">
+        <h2>Campaign history</h2>
+        <p>Every campaign you've generated, saved to your account.</p>
+      </div>
+      <div class="panel">
+        <div class="row" style="align-items:center;">
+          <input type="text" id="historySearch" placeholder="Search campaigns by name…">
+          <button class="btn btn-line" id="historySearchBtn">Search</button>
+        </div>
+        <table style="margin-top:16px;">
+          <thead><tr><th>Date</th><th>Campaign</th><th>Platforms</th><th></th></tr></thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+        <div id="historyEmpty" class="msg" style="color:var(--muted);">No campaigns yet.</div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="view" id="view-settings">
+      <div class="view-head">
+        <h2>AI provider settings</h2>
+        <p>Bring your own key. Stored only in this browser and sent, per request, only to run your generation — never stored on our servers.</p>
+      </div>
+      <div class="panel">
+        <div class="field">
+          <label>Provider</label>
+          <select id="providerSelect">
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="gemini">Google Gemini</option>
+          </select>
+        </div>
+        <div class="field"><label>API key</label><input type="password" id="apiKeyInput" placeholder="sk-..."></div>
+        <div class="field"><label>Model</label><select id="modelSelect"></select></div>
+        <div class="row">
+          <button class="btn btn-gold" id="saveSettingsBtn">Save</button>
+          <button class="btn btn-line" id="testConnBtn">Test connection</button>
+        </div>
+        <div class="status-line" id="connStatus"><span class="dot" id="connDot"></span><span id="connText">Not tested yet</span></div>
+        <div class="diag hidden" id="connDiag"></div>
+      </div>
+    </section>
+
+    <!-- LICENSE -->
+    <section class="view" id="view-license">
+      <div class="view-head">
+        <h2>License</h2>
+        <p>Your plan is verified server-side against your account — not just checked in this browser.</p>
+      </div>
+      <div class="panel">
+        <div class="field"><label>Current plan</label><div id="licenseCurrentPlan" style="font-size:1.1rem; font-family:'Fraunces',serif;">—</div></div>
+        <div class="field"><label for="licenseInput2">Enter a license key</label><input type="text" id="licenseInput2" placeholder="PFAI-ENTERPRISE-XXXX-XXXX"></div>
+        <button class="btn btn-gold" id="activateBtn2">Redeem key</button>
+        <div class="msg" id="licenseMsg2"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+const API = '/.netlify/functions/';
+const TIER_LIMITS = {
+  free:       { maxPlatforms: 2, allowedPlatforms: ['x','facebook'], modules: ['platform_post','email_promo'], label: 'Free' },
+  starter:    { maxPlatforms: 5, allowedPlatforms: ['x','facebook','linkedin','threads'], modules: ['platform_post','email_promo','viral_hook','cta','video_hook'], label: 'Starter' },
+  enterprise: { maxPlatforms: 5, allowedPlatforms: ['x','facebook','linkedin','threads'], modules: ['platform_post','email_promo','viral_hook','cta','video_hook'], label: 'Enterprise' },
+};
+const PLATFORM_LABELS = { x: 'X / Twitter', facebook: 'Facebook', linkedin: 'LinkedIn', threads: 'Threads' };
+
+const store = {
+  get(k, d){ try { const v = localStorage.getItem('pfai_'+k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set(k, v){ localStorage.setItem('pfai_'+k, JSON.stringify(v)); }
+};
+
+function token() { return localStorage.getItem('pfai_token'); }
+function authHeaders() { return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() }; }
+
+let currentUser = null;
+
+async function boot() {
+  if (!token()) { window.location.href = '/login.html'; return; }
+  try {
+    const res = await fetch(API + 'auth-me', { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) { localStorage.removeItem('pfai_token'); window.location.href = '/login.html'; return; }
+    currentUser = data.user;
+    localStorage.setItem('pfai_user', JSON.stringify(currentUser));
+    document.getElementById('loadingGate').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    document.getElementById('userEmail').textContent = currentUser.email;
+    if (currentUser.isAdmin) document.getElementById('adminLink').style.display = 'inline';
+    applyTierUI();
+    loadSettingsIntoForm();
+    populateModels();
+  } catch (err) {
+    document.getElementById('loadingGate').textContent = 'Could not reach the server. Refresh to try again.';
+  }
+}
+boot();
+
+document.getElementById('logoutLink').addEventListener('click', () => {
+  localStorage.removeItem('pfai_token'); localStorage.removeItem('pfai_user');
+  window.location.href = '/login.html';
+});
+
+function applyTierUI() {
+  const tier = TIER_LIMITS[currentUser.tier] || TIER_LIMITS.free;
+  document.getElementById('planLabel').textContent = tier.label;
+  document.getElementById('licenseCurrentPlan').textContent = tier.label;
+  document.getElementById('usageLabel').textContent = currentUser.tier === 'free' ? 'Up to 3 campaigns total' : (currentUser.tier === 'starter' ? 'Up to 20 campaigns, 5/day' : 'Unlimited campaigns');
+
+  document.querySelectorAll('#platformChips .chip').forEach(chip => {
+    const p = chip.dataset.platform;
+    const allowed = tier.allowedPlatforms.includes(p);
+    chip.classList.toggle('disabled', !allowed);
+    chip.querySelector('input').disabled = !allowed;
+    if (!allowed) { chip.querySelector('input').checked = false; chip.classList.remove('on'); }
+  });
+  document.querySelectorAll('#moduleChips .chip').forEach(chip => {
+    const m = chip.dataset.module;
+    const allowed = tier.modules.includes(m);
+    chip.classList.toggle('disabled', !allowed);
+    chip.querySelector('input').disabled = !allowed;
+    if (!allowed) { chip.querySelector('input').checked = false; chip.classList.remove('on'); }
+  });
+}
+
+// ---- Nav ----
+document.querySelectorAll('nav.side button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav.side button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('view-' + btn.dataset.view).classList.add('active');
+    if (btn.dataset.view === 'history') loadHistory();
+  });
+});
+
+// ---- Chips ----
+document.querySelectorAll('#platformChips .chip, #moduleChips .chip').forEach(chip => {
+  const input = chip.querySelector('input');
+  input.addEventListener('change', () => { if (!input.disabled) chip.classList.toggle('on', input.checked); });
+});
+
+// ---- Settings ----
+const MODELS = {
+  openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1'],
+  anthropic: ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-opus-4-8'],
+  gemini: ['gemini-2.0-flash', 'gemini-2.0-pro']
+};
+function populateModels() {
+  const provider = document.getElementById('providerSelect').value;
+  const sel = document.getElementById('modelSelect');
+  sel.innerHTML = '';
+  MODELS[provider].forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); });
+}
+document.getElementById('providerSelect').addEventListener('change', populateModels);
+
+function loadSettingsIntoForm() {
+  const s = store.get('aiSettings', {});
+  if (s.provider) document.getElementById('providerSelect').value = s.provider;
+  populateModels();
+  if (s.model) document.getElementById('modelSelect').value = s.model;
+  if (s.apiKey) document.getElementById('apiKeyInput').value = s.apiKey;
+}
+document.getElementById('saveSettingsBtn').addEventListener('click', () => {
+  store.set('aiSettings', {
+    provider: document.getElementById('providerSelect').value,
+    model: document.getElementById('modelSelect').value,
+    apiKey: document.getElementById('apiKeyInput').value.trim()
+  });
+  document.getElementById('connText').textContent = 'Settings saved — not tested yet';
+  document.getElementById('connDot').className = 'dot';
+});
+
+document.getElementById('testConnBtn').addEventListener('click', async () => {
+  const s = store.get('aiSettings', {});
+  const dot = document.getElementById('connDot'), text = document.getElementById('connText'), diag = document.getElementById('connDiag');
+  text.textContent = 'Testing…'; dot.className = 'dot'; diag.classList.add('hidden');
+  try {
+    const res = await fetch(API + 'test-connection', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(s) });
+    const result = await res.json();
+    if (result.success) { dot.className = 'dot ok'; text.textContent = 'Connected — provider responded successfully.'; }
+    else { dot.className = 'dot err'; text.textContent = `Not connected: ${result.error}`; diag.textContent = `code: ${result.code || 'n/a'}`; diag.classList.remove('hidden'); }
+  } catch (err) {
+    dot.className = 'dot err'; text.textContent = 'Could not reach the server.';
+  }
+});
+
+// ---- License ----
+document.getElementById('activateBtn2').addEventListener('click', async () => {
+  const key = document.getElementById('licenseInput2').value.trim();
+  const msg = document.getElementById('licenseMsg2');
+  if (!key) { msg.textContent = 'Enter a key.'; msg.className = 'msg err'; return; }
+  msg.textContent = 'Checking…'; msg.className = 'msg';
+  try {
+    const res = await fetch(API + 'keys-redeem', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ key }) });
+    const data = await res.json();
+    if (data.success) {
+      currentUser = data.user;
+      localStorage.setItem('pfai_token', data.token);
+      localStorage.setItem('pfai_user', JSON.stringify(currentUser));
+      applyTierUI();
+      msg.textContent = `Activated: ${TIER_LIMITS[currentUser.tier].label} plan.`; msg.className = 'msg ok';
+    } else {
+      msg.textContent = data.error || 'Could not redeem key.'; msg.className = 'msg err';
+    }
+  } catch (err) { msg.textContent = 'Could not reach the server.'; msg.className = 'msg err'; }
+});
+
+// ---- Generation ----
+function selectedPlatforms() { return [...document.querySelectorAll('#platformChips input:checked')].map(i => i.value); }
+function selectedModules() { return [...document.querySelectorAll('#moduleChips input:checked')].map(i => i.value); }
+function escapeHtml(s){ return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function copyText(text) { navigator.clipboard.writeText(text).catch(() => {}); }
+
+document.getElementById('generateBtn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('genStatus');
+  const s = store.get('aiSettings', {});
+  const campaign = {
+    name: document.getElementById('campName').value.trim(),
+    offerUrl: document.getElementById('campOffer').value.trim(),
+    targetAudience: document.getElementById('campAudience').value.trim(),
+    mainBenefit: document.getElementById('campBenefit').value.trim(),
+    tone: document.getElementById('toneSelect').value
+  };
+  const platforms = selectedPlatforms();
+  const modules = selectedModules();
+
+  if (!campaign.name) { statusEl.textContent = 'Give this campaign a name.'; statusEl.style.color = 'var(--err)'; return; }
+  if (!s.apiKey) { statusEl.textContent = 'Add your AI provider key in Settings first.'; statusEl.style.color = 'var(--err)'; return; }
+  if (platforms.length === 0 && modules.filter(m=>m!=='platform_post').length === 0) {
+    statusEl.textContent = 'Pick at least one platform or module.'; statusEl.style.color = 'var(--err)'; return;
+  }
+
+  const btn = document.getElementById('generateBtn');
+  btn.disabled = true; statusEl.style.color = 'var(--muted)'; statusEl.textContent = 'Generating…';
+
+  try {
+    const res = await fetch(API + 'campaigns-create', {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ provider: s.provider, apiKey: s.apiKey, model: s.model, campaign, platforms, modules })
+    });
+    const data = await res.json();
+    btn.disabled = false;
+
+    if (!data.success) {
+      if (data.code === 'PARSE_FAILED' && data.rawText) {
+        statusEl.textContent = 'The AI response could not be parsed as JSON — raw response below.';
+        statusEl.style.color = 'var(--err)';
+        renderRawFallback(data.rawText);
+        return;
+      }
+      statusEl.textContent = `Generation failed: ${data.error}`; statusEl.style.color = 'var(--err)';
+      return;
+    }
+
+    statusEl.textContent = 'Done.'; statusEl.style.color = 'var(--ok)';
+    renderResults(data.assets, data.campaign);
+  } catch (err) {
+    btn.disabled = false;
+    statusEl.textContent = 'Could not reach the server.'; statusEl.style.color = 'var(--err)';
+  }
+});
+
+function renderRawFallback(text) {
+  const wrap = document.getElementById('resultsWrap');
+  wrap.innerHTML = '';
+  const card = document.createElement('div');
+  card.className = 'result-card';
+  card.innerHTML = `<div class="label">Raw response<button class="copy-btn">Copy</button></div><pre>${escapeHtml(text)}</pre>`;
+  card.querySelector('.copy-btn').addEventListener('click', () => copyText(text));
+  wrap.appendChild(card);
+}
+
+let lastResults = null;
+
+function renderResults(assets, campaignMeta) {
+  lastResults = { assets, campaignMeta };
+  const wrap = document.getElementById('resultsWrap');
+  wrap.innerHTML = '';
+
+  const exportBar = document.createElement('div');
+  exportBar.className = 'row';
+  exportBar.style.marginBottom = '14px';
+  exportBar.innerHTML = `
+    <button class="btn btn-line" id="exportTxt">Export TXT</button>
+    <button class="btn btn-line" id="exportCsv">Export CSV</button>
+    <button class="btn btn-line" id="exportPdf">Export PDF</button>`;
+  wrap.appendChild(exportBar);
+  document.getElementById('exportTxt').addEventListener('click', () => exportAssets('txt'));
+  document.getElementById('exportCsv').addEventListener('click', () => exportAssets('csv'));
+  document.getElementById('exportPdf').addEventListener('click', () => exportAssets('pdf'));
+
+  assets.forEach(a => {
+    const card = document.createElement('div');
+    card.className = 'result-card';
+    card.innerHTML = `<div class="label">${escapeHtml(a.label)}<button class="copy-btn">Copy</button></div><pre>${escapeHtml(a.content)}</pre>`;
+    card.querySelector('.copy-btn').addEventListener('click', () => copyText(a.content));
+    wrap.appendChild(card);
+  });
+}
+
+function exportAssets(format) {
+  if (!lastResults) return;
+  const { assets, campaignMeta } = lastResults;
+  const filenameBase = (campaignMeta?.name || 'campaign').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+  if (format === 'txt') {
+    const text = assets.map(a => `${a.label}\n${'-'.repeat(a.label.length)}\n${a.content}\n`).join('\n');
+    downloadBlob(text, `${filenameBase}.txt`, 'text/plain');
+  } else if (format === 'csv') {
+    const rows = [['Label', 'Content']].concat(assets.map(a => [a.label, a.content.replace(/\n/g, ' ')]));
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    downloadBlob(csv, `${filenameBase}.csv`, 'text/csv');
+  } else if (format === 'pdf') {
+    // Honest approach: open a print-formatted view and hand off to the
+    // browser's native "Save as PDF" — no fabricated binary PDF generation.
+    const win = window.open('', '_blank');
+    const html = `<html><head><title>${escapeHtml(campaignMeta?.name || 'Campaign')}</title>
+      <style>body{font-family:sans-serif; padding:40px;} h2{margin-top:28px;} pre{white-space:pre-wrap; font-family:inherit;}</style>
+      </head><body><h1>${escapeHtml(campaignMeta?.name || 'Campaign')}</h1>
+      ${assets.map(a => `<h2>${escapeHtml(a.label)}</h2><pre>${escapeHtml(a.content)}</pre>`).join('')}
+      </body></html>`;
+    win.document.write(html);
+    win.document.close();
+    win.print();
+  }
+}
+
+function downloadBlob(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+
+// ---- History ----
+async function loadHistory(q) {
+  const body = document.getElementById('historyBody');
+  const empty = document.getElementById('historyEmpty');
+  body.innerHTML = '';
+  try {
+    const url = API + 'campaigns-list' + (q ? '?q=' + encodeURIComponent(q) : '');
+    const res = await fetch(url, { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) { empty.textContent = data.error || 'Could not load history.'; empty.classList.remove('hidden'); return; }
+    empty.classList.toggle('hidden', data.campaigns.length > 0);
+    data.campaigns.forEach(c => {
+      const tr = document.createElement('tr');
+      const date = new Date(c.created_at).toLocaleString();
+      const platforms = (c.platforms || []).map(p => PLATFORM_LABELS[p] || p).join(', ') || '—';
+      tr.innerHTML = `<td>${date}</td><td>${escapeHtml(c.name)}</td><td>${platforms}</td><td><button class="copy-btn" data-id="${c.id}">Open</button></td>`;
+      body.appendChild(tr);
+    });
+    body.querySelectorAll('button[data-id]').forEach(btn => {
+      btn.addEventListener('click', () => openCampaign(btn.dataset.id));
+    });
+  } catch (err) {
+    empty.textContent = 'Could not reach the server.'; empty.classList.remove('hidden');
+  }
+}
+
+async function openCampaign(id) {
+  try {
+    const res = await fetch(API + 'campaigns-get?id=' + id, { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) return;
+    document.querySelector('nav.side button[data-view="generate"]').click();
+    document.getElementById('campName').value = data.campaign.name || '';
+    document.getElementById('campOffer').value = data.campaign.offer_url || '';
+    document.getElementById('campAudience').value = data.campaign.target_audience || '';
+    document.getElementById('campBenefit').value = data.campaign.main_benefit || '';
+    renderResults(data.assets, { name: data.campaign.name });
+  } catch (err) { /* noop */ }
+}
+
+document.getElementById('historySearchBtn').addEventListener('click', () => loadHistory(document.getElementById('historySearch').value.trim()));
+</script>
+</body>
+</html>

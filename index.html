@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PulseForge AI OS — One Idea, Every Platform</title>
+<meta name="description" content="Turn a product, a URL, or a raw idea into ready-to-post social content and email copy for every platform you market on — using your own AI keys.">
+<style>
+  :root{
+    --ink:#0B1220;
+    --ink2:#101A2E;
+    --paper:#F6F3EC;
+    --gold:#E8A33D;
+    --gold-dim:#B87F27;
+    --wave:#5BA3A3;
+    --line:rgba(246,243,236,0.14);
+    --muted:#9AA5B8;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0; background:var(--ink); color:var(--paper);
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    line-height:1.55;
+  }
+  h1,h2,h3{
+    font-family:'Fraunces','Georgia',serif; font-weight:600; letter-spacing:-0.01em; margin:0 0 .5em;
+  }
+  a{color:inherit;}
+  .wrap{max-width:1120px; margin:0 auto; padding:0 24px;}
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px; font-size:.72rem; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--wave); font-weight:600;
+  }
+  .eyebrow::before{content:''; width:18px; height:1px; background:var(--wave);}
+
+  header{
+    position:sticky; top:0; z-index:40; backdrop-filter:blur(10px);
+    background:rgba(11,18,32,0.82); border-bottom:1px solid var(--line);
+  }
+  nav{display:flex; align-items:center; justify-content:space-between; padding:16px 0;}
+  .brand{display:flex; align-items:center; gap:10px; font-family:'Fraunces',serif; font-size:1.15rem; font-weight:600;}
+  .brand svg{display:block;}
+  nav .links{display:flex; gap:28px; font-size:.92rem; color:var(--muted);}
+  nav .links a:hover{color:var(--paper);}
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    padding:12px 22px; border-radius:3px; font-weight:600; font-size:.92rem;
+    text-decoration:none; cursor:pointer; border:1px solid transparent; transition:transform .15s ease, background .2s ease;
+  }
+  .btn-gold{background:var(--gold); color:#20140a;}
+  .btn-gold:hover{background:#f0b158; transform:translateY(-1px);}
+  .btn-line{border-color:var(--line); color:var(--paper);}
+  .btn-line:hover{border-color:var(--gold);}
+
+  /* HERO */
+  .hero{padding:110px 0 90px; position:relative; overflow:hidden;}
+  .hero::before{
+    content:''; position:absolute; inset:0; z-index:0;
+    background:
+      radial-gradient(600px 300px at 85% -10%, rgba(232,163,61,0.16), transparent 70%),
+      radial-gradient(500px 260px at 10% 110%, rgba(91,163,163,0.14), transparent 70%);
+  }
+  .hero-inner{position:relative; z-index:1; display:grid; grid-template-columns:1.1fr .9fr; gap:60px; align-items:center;}
+  .hero h1{font-size:clamp(2.3rem,4.2vw,3.4rem); line-height:1.06; max-width:15ch;}
+  .hero p.lead{font-size:1.08rem; color:var(--muted); max-width:46ch; margin:18px 0 30px;}
+  .hero .cta-row{display:flex; gap:14px; flex-wrap:wrap;}
+  .fine{font-size:.8rem; color:var(--muted); margin-top:14px;}
+
+  /* signature: pulse/broadcast waveform */
+  .pulse-card{
+    background:var(--ink2); border:1px solid var(--line); border-radius:6px; padding:26px;
+    position:relative; overflow:hidden;
+  }
+  .pulse-card .src{font-size:.78rem; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; margin-bottom:10px;}
+  .pulse-card .idea{font-family:'Fraunces',serif; font-size:1.15rem; margin-bottom:20px; color:var(--paper);}
+  .waveform{display:flex; align-items:flex-end; gap:4px; height:52px; margin:8px 0 22px;}
+  .waveform i{
+    display:block; width:5px; background:linear-gradient(180deg,var(--wave),var(--gold)); border-radius:2px;
+    animation:pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:.55;} 50%{opacity:1;}}
+  @media (prefers-reduced-motion:reduce){ .waveform i{animation:none;} }
+  .outputs{display:grid; grid-template-columns:repeat(3,1fr); gap:8px;}
+  .outputs span{
+    font-size:.72rem; text-align:center; padding:9px 4px; border:1px solid var(--line); border-radius:3px; color:var(--muted);
+  }
+
+  section{padding:88px 0; border-top:1px solid var(--line);}
+  .section-head{max-width:640px; margin-bottom:46px;}
+  .section-head h2{font-size:clamp(1.6rem,3vw,2.2rem);}
+  .section-head p{color:var(--muted); font-size:1rem;}
+
+  .grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:24px;}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:24px;}
+  .card{background:var(--ink2); border:1px solid var(--line); border-radius:6px; padding:26px;}
+  .card h3{font-size:1.05rem; margin-bottom:8px;}
+  .card p{color:var(--muted); font-size:.92rem; margin:0;}
+  .num{font-family:'Fraunces',serif; color:var(--gold); font-size:.85rem; margin-bottom:10px; display:block;}
+
+  .steps{display:grid; grid-template-columns:repeat(4,1fr); gap:0; position:relative;}
+  .steps::before{content:''; position:absolute; top:26px; left:5%; right:5%; height:1px; background:var(--line);}
+  .step{position:relative; padding-right:20px;}
+  .step .dot{width:10px; height:10px; border-radius:50%; background:var(--gold); margin-bottom:16px; position:relative; z-index:1;}
+  .step h4{font-family:'Fraunces',serif; font-size:1rem; margin:0 0 6px;}
+  .step p{color:var(--muted); font-size:.88rem; margin:0;}
+
+  .pricing{display:grid; grid-template-columns:repeat(3,1fr); gap:22px;}
+  .plan{background:var(--ink2); border:1px solid var(--line); border-radius:8px; padding:30px; display:flex; flex-direction:column;}
+  .plan.feat{border-color:var(--gold); position:relative;}
+  .plan.feat::before{
+    content:'Most popular'; position:absolute; top:-13px; right:24px; background:var(--gold); color:#20140a;
+    font-size:.7rem; font-weight:700; padding:4px 10px; border-radius:3px; letter-spacing:.04em;
+  }
+  .plan h3{font-size:1.1rem;}
+  .price{font-family:'Fraunces',serif; font-size:2.3rem; margin:10px 0 4px;}
+  .price small{font-size:.9rem; color:var(--muted); font-weight:400;}
+  .plan ul{list-style:none; padding:0; margin:20px 0 26px; flex:1;}
+  .plan li{font-size:.9rem; color:var(--muted); padding:8px 0; border-top:1px solid var(--line); display:flex; gap:10px;}
+  .plan li:first-child{border-top:none;}
+  .plan li::before{content:'—'; color:var(--wave); flex-shrink:0;}
+
+  footer{padding:50px 0; border-top:1px solid var(--line); color:var(--muted); font-size:.85rem;}
+  footer .foot-row{display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;}
+
+  .lead-capture{
+    background:var(--ink2); border:1px solid var(--line); border-radius:8px; padding:40px; text-align:center;
+  }
+  .lead-capture h2{margin-bottom:10px;}
+  .lead-capture p{color:var(--muted); max-width:44ch; margin:0 auto 26px;}
+  .lead-form{display:flex; gap:10px; max-width:440px; margin:0 auto; flex-wrap:wrap; justify-content:center;}
+  .lead-form input[type=email]{
+    flex:1; min-width:220px; padding:13px 16px; border-radius:3px; border:1px solid var(--line);
+    background:var(--ink); color:var(--paper); font-size:.95rem;
+  }
+  .lead-form input[type=email]:focus{outline:2px solid var(--gold); outline-offset:1px;}
+  .lead-msg{margin-top:14px; font-size:.88rem; min-height:1.2em;}
+  .lead-msg.ok{color:var(--wave);}
+  .lead-msg.err{color:#e08a6a;}
+
+  @media (max-width:860px){
+    .hero-inner{grid-template-columns:1fr;}
+    .grid3,.grid2,.pricing{grid-template-columns:1fr;}
+    .steps{grid-template-columns:1fr; gap:26px;}
+    .steps::before{display:none;}
+    nav .links{display:none;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <nav>
+      <div class="brand">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M2 12h4l2-7 4 14 3-9 2 4h5" stroke="#E8A33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        PulseForge <span style="color:var(--gold)">AI</span>
+      </div>
+      <div class="links">
+        <a href="#how">How it works</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#list">Free samples</a>
+      </div>
+      <a class="btn btn-line" href="/login.html">Sign in</a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero" style="border-top:none; padding-top:110px;">
+  <div class="wrap hero-inner">
+    <div>
+      <span class="eyebrow">Content → Every Channel</span>
+      <h1>One idea in. A full day of content out.</h1>
+      <p class="lead">Paste a product, a URL, or a rough idea. PulseForge AI OS turns it into a full campaign — platform posts for X, Facebook, LinkedIn, and Threads, viral hooks, CTAs, video hooks, and email copy — using your own AI provider key.</p>
+      <div class="cta-row">
+        <a class="btn btn-gold" href="/register.html">Start generating free</a>
+        <a class="btn btn-line" href="#how">See how it works</a>
+      </div>
+      <p class="fine">No credit card. Bring your own OpenAI, Anthropic, or Gemini key — you control the AI cost, we never mark it up.</p>
+    </div>
+    <div class="pulse-card">
+      <div class="src">Input</div>
+      <div class="idea">"Our new cast-iron skillet — pre-seasoned, oven safe to 500°."</div>
+      <div class="waveform" aria-hidden="true">
+        <i style="height:18px; animation-delay:.0s"></i><i style="height:34px; animation-delay:.1s"></i>
+        <i style="height:46px; animation-delay:.2s"></i><i style="height:26px; animation-delay:.3s"></i>
+        <i style="height:40px; animation-delay:.4s"></i><i style="height:20px; animation-delay:.5s"></i>
+        <i style="height:44px; animation-delay:.6s"></i><i style="height:30px; animation-delay:.7s"></i>
+        <i style="height:16px; animation-delay:.8s"></i><i style="height:38px; animation-delay:.9s"></i>
+      </div>
+      <div class="src">Output — 60 seconds later</div>
+      <div class="outputs">
+        <span>X post</span><span>LinkedIn post</span><span>Facebook post</span>
+        <span>Threads post</span><span>Viral hook</span><span>Email copy</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">The mechanic</span>
+      <h2>Same idea, rewritten for how each platform actually reads.</h2>
+      <p>Most "AI content" tools give you one generic paragraph and call it done. PulseForge writes a distinct pass per destination — LinkedIn gets structure and a professional hook, X gets a punch line, Threads gets a casual conversational take, and the email gets a subject line built to be opened.</p>
+    </div>
+    <div class="steps">
+      <div class="step"><div class="dot"></div><h4>Drop the source</h4><p>A product name, a URL, or just an idea in plain words.</p></div>
+      <div class="step"><div class="dot"></div><h4>Pick your channels</h4><p>Choose which platforms and your brand's tone — no bloated settings.</p></div>
+      <div class="step"><div class="dot"></div><h4>Generate the set</h4><p>Your own AI key runs the real generation — nothing pre-written or templated.</p></div>
+      <div class="step"><div class="dot"></div><h4>Copy and post</h4><p>Every output has a one-click copy button and lives in your history.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Built for people who post daily</span>
+      <h2>What you actually get</h2>
+    </div>
+    <div class="grid3">
+      <div class="card"><span class="num">01</span><h3>Multi-platform posts</h3><p>Two distinct posts each for X, Facebook, LinkedIn, and Threads, from one campaign brief, each written in that platform's native voice.</p></div>
+      <div class="card"><span class="num">02</span><h3>Viral hooks &amp; CTAs</h3><p>Three scroll-stopping opening lines and five call-to-action variations per campaign — reusable across any platform.</p></div>
+      <div class="card"><span class="num">03</span><h3>Video hooks</h3><p>Three short spoken opening lines built for the first three seconds of a YouTube Short, TikTok, or Reel.</p></div>
+      <div class="card"><span class="num">04</span><h3>Email promo, paired</h3><p>A subject line + body written to promote the same offer by email — so your list and your social feed say the same thing, differently.</p></div>
+      <div class="card"><span class="num">05</span><h3>Bring your own AI key</h3><p>Connect OpenAI, Anthropic, or Gemini with your own key. Test the connection before you rely on it. You see exactly what you're spending — we don't mark it up.</p></div>
+      <div class="card"><span class="num">06</span><h3>Real accounts, real history</h3><p>Every campaign is saved to your account, searchable, and exportable as TXT, CSV, or PDF.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Pricing</span>
+      <h2>Pick a tier. Upgrade whenever you outgrow it.</h2>
+    </div>
+    <div class="pricing">
+      <div class="plan">
+        <h3>Free</h3>
+        <div class="price">$0<small> /forever</small></div>
+        <ul>
+          <li>3 campaigns total</li>
+          <li>X + Facebook only</li>
+          <li>Platform posts + email promo</li>
+          <li>Campaign history</li>
+        </ul>
+        <a class="btn btn-line" href="/register.html">Start free</a>
+      </div>
+      <div class="plan feat">
+        <h3>Starter</h3>
+        <div class="price">$47<small> one-time</small></div>
+        <ul>
+          <li>20 campaigns total, 5/day</li>
+          <li>X, Facebook, LinkedIn, Threads</li>
+          <li>Viral hooks, CTAs, video hooks</li>
+          <li>TXT / CSV / PDF export</li>
+        </ul>
+        <a class="btn btn-gold" href="/register.html">Get Starter</a>
+      </div>
+      <div class="plan">
+        <h3>Enterprise</h3>
+        <div class="price">$97<small> one-time</small></div>
+        <ul>
+          <li>Unlimited campaigns</li>
+          <li>Every platform + every module</li>
+          <li>Priority support</li>
+        </ul>
+        <a class="btn btn-line" href="/register.html">Get Enterprise</a>
+      </div>
+    </div>
+    <p class="fine" style="margin-top:20px;">Payment links are added by the seller at checkout. AI usage runs through your own provider key and is billed by that provider directly — not included in the price above.</p>
+  </div>
+</section>
+
+<section id="list">
+  <div class="wrap">
+    <div class="lead-capture">
+      <span class="eyebrow" style="justify-content:center;">Free weekly drop</span>
+      <h2>Get 5 done-for-you content prompts, every Friday</h2>
+      <p>Real prompts you can paste straight into PulseForge — no course, no upsell in the first email, just usable content angles for video and content marketers.</p>
+      <form class="lead-form" id="leadForm">
+        <input type="email" id="leadEmail" placeholder="you@business.com" required>
+        <button type="submit" class="btn btn-gold">Send them to me</button>
+      </form>
+      <div class="lead-msg" id="leadMsg" role="status"></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-row">
+    <div>PulseForge AI OS — built by ClipperBoss</div>
+    <div><a href="/login.html">Sign in</a> · <a href="/register.html">Create account</a></div>
+  </div>
+</footer>
+
+<script>
+document.getElementById('leadForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('leadEmail').value.trim();
+  const msg = document.getElementById('leadMsg');
+  const btn = e.target.querySelector('button');
+  msg.textContent = ''; msg.className = 'lead-msg';
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const res = await fetch('/.netlify/functions/leads-capture', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ email, tag: 'landing-page-weekly-drop', source: 'landing-page' })
+    });
+    const data = await res.json();
+    if (data.success) {
+      msg.textContent = "You're in — check your inbox to confirm.";
+      msg.classList.add('ok');
+      e.target.reset();
+    } else {
+      msg.textContent = data.error || 'Something went wrong. Try again in a moment.';
+      msg.classList.add('err');
+    }
+  } catch (err) {
+    msg.textContent = 'Could not reach the server. Check your connection and try again.';
+    msg.classList.add('err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Send them to me';
+  }
+});
+</script>
+
+</body>
+</html>

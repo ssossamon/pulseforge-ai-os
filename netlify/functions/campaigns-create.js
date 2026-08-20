@@ -1,0 +1,204 @@
+// netlify/functions/campaigns-create.js — the core generator.
+// Enforces tier limits SERVER-SIDE (closing the earlier client-side-only gap),
+// calls the user's own AI provider key (BYOK, never stored), and persists the
+// resulting campaign + every generated asset to Postgres.
+const { query } = require('../../lib/db');
+const { requireAuth } = require('../../lib/auth');
+const { callProvider } = require('../../lib/ai-provider');
+const { TIERS } = require('../../lib/tiers');
+
+const PLATFORM_SPEC = {
+  x: 'X/Twitter post — under 280 characters, punchy, max 2 hashtags',
+  facebook: 'Facebook post — conversational, 2-4 sentences, inviting comments',
+  linkedin: 'LinkedIn post — 3-5 short paragraphs, professional but human, ends with a soft call to engage',
+  threads: 'Threads post — casual, conversational, under 500 characters',
+};
+
+const TONE_DESC = {
+  direct: 'direct, benefit-first, no fluff',
+  playful: 'playful, conversational, light humor',
+  authority: 'confident, expert, backed by specifics',
+  story: 'storytelling, scene-setting, narrative hook',
+};
+
+function buildPrompt({ name, offerUrl, targetAudience, mainBenefit, tone, platforms, modules }) {
+  const toneDesc = TONE_DESC[tone] || TONE_DESC.direct;
+  const shape = {};
+  const notes = [];
+
+  if (modules.includes('platform_post') && platforms.length) {
+    shape.platform_posts = {};
+    platforms.forEach((p) => {
+      shape.platform_posts[p] = ['first version', 'a distinctly different second version'];
+    });
+    notes.push('platform_posts: give TWO distinct posts per platform, matching each platform\'s native format described below:\n' + platforms.map((p) => `- ${p}: ${PLATFORM_SPEC[p]}`).join('\n'));
+  }
+  if (modules.includes('viral_hook')) {
+    shape.viral_hooks = ['hook 1', 'hook 2', 'hook 3'];
+    notes.push('viral_hooks: 3 scroll-stopping opening lines usable across any platform, each a single sentence.');
+  }
+  if (modules.includes('cta')) {
+    shape.ctas = ['cta 1', 'cta 2', 'cta 3', 'cta 4', 'cta 5'];
+    notes.push('ctas: 5 distinct call-to-action variations tailored to the offer and audience, each under 15 words.');
+  }
+  if (modules.includes('video_hook')) {
+    shape.video_hooks = ['hook 1', 'hook 2', 'hook 3'];
+    notes.push('video_hooks: 3 short spoken opening lines (first 3 seconds) for YouTube/TikTok/Reels — attention-grabbing, not full scripts.');
+  }
+  if (modules.includes('email_promo')) {
+    shape.email_promo = { subject: 'subject under 60 characters', body: '3-5 short paragraphs' };
+    notes.push('email_promo: a subject line written to be opened, and a plain-text promotional email body.');
+  }
+
+  return `You are a marketing copywriter writing real, ready-to-use campaign assets — not descriptions of what they'd look like.
+
+CAMPAIGN
+Name: ${name}
+Offer / URL / product: ${offerUrl || '(not provided — infer reasonably from the name)'}
+Target audience: ${targetAudience || '(not specified — infer a sensible general audience)'}
+Main benefit to emphasize: ${mainBenefit || '(not specified — infer the most compelling benefit from the offer)'}
+Tone: ${toneDesc}
+
+Write the following modules:
+${notes.join('\n\n')}
+
+Return ONLY valid JSON, no markdown code fences, no commentary, in exactly this shape:
+${JSON.stringify(shape, null, 2)}
+
+Every value must be the finished, ready-to-use copy itself. Do not invent statistics, testimonials, or claims not reasonably implied by the input.`;
+}
+
+function stripFences(text) {
+  return text.replace(/^```(json)?/i, '').replace(/```$/, '').trim();
+}
+
+exports.handler = async (event) => {
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, body: JSON.stringify({ success: false, error: 'Use POST.' }) };
+  }
+  const payload = requireAuth(event);
+  if (!payload) return { statusCode: 401, body: JSON.stringify({ success: false, error: 'Not signed in.' }) };
+
+  let body;
+  try {
+    body = JSON.parse(event.body || '{}');
+  } catch {
+    return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Invalid JSON body.' }) };
+  }
+
+  const { provider, apiKey, model, campaign, platforms = [], modules = [] } = body;
+  const name = (campaign?.name || '').trim();
+
+  if (!name) return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Campaign name is required.' }) };
+  if (platforms.length === 0 && modules.filter((m) => m !== 'platform_post').length === 0) {
+    return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Select at least one platform or module.' }) };
+  }
+
+  try {
+    // Fresh tier check — never trust the token's cached tier for enforcement.
+    const userRow = await query('SELECT tier FROM users WHERE id = $1', [payload.sub]);
+    const tierName = userRow.rows[0]?.tier || 'free';
+    const tier = TIERS[tierName] || TIERS.free;
+
+    const disallowedPlatform = platforms.find((p) => !tier.allowedPlatforms.includes(p));
+    if (disallowedPlatform) {
+      return { statusCode: 403, body: JSON.stringify({ success: false, code: 'TIER_PLATFORM', error: `Your ${tier.label} plan doesn't include ${disallowedPlatform}. Upgrade to unlock it.` }) };
+    }
+    if (platforms.length > tier.maxPlatforms) {
+      return { statusCode: 403, body: JSON.stringify({ success: false, code: 'TIER_PLATFORM_COUNT', error: `Your ${tier.label} plan allows up to ${tier.maxPlatforms} platforms per campaign.` }) };
+    }
+    const disallowedModule = modules.find((m) => !tier.modules.includes(m));
+    if (disallowedModule) {
+      return { statusCode: 403, body: JSON.stringify({ success: false, code: 'TIER_MODULE', error: `Your ${tier.label} plan doesn't include the "${disallowedModule}" module. Upgrade to unlock it.` }) };
+    }
+
+    if (tier.totalCampaignCap != null) {
+      const totalResult = await query('SELECT COUNT(*)::int AS n FROM campaigns WHERE user_id = $1', [payload.sub]);
+      if (totalResult.rows[0].n >= tier.totalCampaignCap) {
+        return { statusCode: 403, body: JSON.stringify({ success: false, code: 'TIER_TOTAL_CAP', error: `Your ${tier.label} plan is limited to ${tier.totalCampaignCap} total campaigns. Upgrade for more.` }) };
+      }
+    }
+    if (tier.dailyCap != null) {
+      const dailyResult = await query("SELECT COUNT(*)::int AS n FROM campaigns WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '1 day'", [payload.sub]);
+      if (dailyResult.rows[0].n >= tier.dailyCap) {
+        return { statusCode: 403, body: JSON.stringify({ success: false, code: 'TIER_DAILY_CAP', error: `Your ${tier.label} plan is limited to ${tier.dailyCap} campaigns per day. Try again tomorrow or upgrade.` }) };
+      }
+    }
+
+    const prompt = buildPrompt({
+      name,
+      offerUrl: campaign.offerUrl,
+      targetAudience: campaign.targetAudience,
+      mainBenefit: campaign.mainBenefit,
+      tone: campaign.tone,
+      platforms,
+      modules,
+    });
+
+    const aiResult = await callProvider(provider, {
+      apiKey,
+      model,
+      systemPrompt: 'You write real, finished marketing campaign copy and reply with strict JSON only.',
+      userPrompt: prompt,
+      maxTokens: 3000,
+    });
+
+    if (!aiResult.success) {
+      return { statusCode: 502, body: JSON.stringify({ success: false, code: aiResult.code, error: aiResult.error }) };
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(stripFences(aiResult.text));
+    } catch {
+      return { statusCode: 200, body: JSON.stringify({ success: false, code: 'PARSE_FAILED', error: 'The AI response could not be parsed as JSON.', rawText: aiResult.text }) };
+    }
+
+    // Persist campaign + assets.
+    const campResult = await query(
+      `INSERT INTO campaigns (user_id, name, offer_url, target_audience, main_benefit, tone, platforms, asset_modules)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, created_at`,
+      [payload.sub, name, campaign.offerUrl || null, campaign.targetAudience || null, campaign.mainBenefit || null, campaign.tone || 'direct', platforms, modules]
+    );
+    const campaignId = campResult.rows[0].id;
+    const assetsToInsert = [];
+
+    if (parsed.platform_posts) {
+      Object.entries(parsed.platform_posts).forEach(([platform, posts]) => {
+        (Array.isArray(posts) ? posts : [posts]).forEach((content, idx) => {
+          assetsToInsert.push({ module: 'platform_post', platform, label: `${platform.toUpperCase()} Post #${idx + 1}`, content });
+        });
+      });
+    }
+    if (Array.isArray(parsed.viral_hooks)) {
+      parsed.viral_hooks.forEach((content, idx) => assetsToInsert.push({ module: 'viral_hook', platform: null, label: `Viral Hook #${idx + 1}`, content }));
+    }
+    if (Array.isArray(parsed.ctas)) {
+      parsed.ctas.forEach((content, idx) => assetsToInsert.push({ module: 'cta', platform: null, label: `CTA #${idx + 1}`, content }));
+    }
+    if (Array.isArray(parsed.video_hooks)) {
+      parsed.video_hooks.forEach((content, idx) => assetsToInsert.push({ module: 'video_hook', platform: null, label: `Video Hook #${idx + 1}`, content }));
+    }
+    if (parsed.email_promo) {
+      assetsToInsert.push({ module: 'email_promo', platform: null, label: 'Email Promo', content: `Subject: ${parsed.email_promo.subject}\n\n${parsed.email_promo.body}` });
+    }
+
+    for (const a of assetsToInsert) {
+      await query('INSERT INTO assets (campaign_id, module, platform, label, content) VALUES ($1,$2,$3,$4,$5)', [campaignId, a.module, a.platform, a.label, a.content]);
+    }
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        success: true,
+        campaign: { id: campaignId, name, createdAt: campResult.rows[0].created_at, platforms, modules },
+        assets: assetsToInsert,
+      }),
+    };
+  } catch (err) {
+    if (err.message === 'NO_DATABASE_CONFIGURED') {
+      return { statusCode: 501, body: JSON.stringify({ success: false, error: 'Database not configured yet on this deployment.' }) };
+    }
+    return { statusCode: 500, body: JSON.stringify({ success: false, error: err.message }) };
+  }
+};
