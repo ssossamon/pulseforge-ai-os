@@ -394,7 +394,13 @@ async function loadTemplates() {
     if (!data.success) return;
     templatesCache = data.templates;
     const sel = document.getElementById('templateSelect');
-    sel.innerHTML = '<option value="">— None —</option>' + templatesCache.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+    const builtins = templatesCache.filter(t => t.is_builtin);
+    const own = templatesCache.filter(t => !t.is_builtin);
+    const opt = (t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`;
+    let html = '<option value="">— None —</option>';
+    if (builtins.length) html += `<optgroup label="Starter templates">${builtins.map(opt).join('')}</optgroup>`;
+    if (own.length) html += `<optgroup label="Your templates">${own.map(opt).join('')}</optgroup>`;
+    sel.innerHTML = html;
   } catch (err) { /* noop */ }
 }
 document.getElementById('templateSelect').addEventListener('change', (e) => {
