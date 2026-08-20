@@ -696,6 +696,142 @@ function renderResults(assets, campaignMeta) {
     if (postEl) postEl.addEventListener('click', () => postNow(postEl, a.platform, a.content));
     wrap.appendChild(card);
   });
+
+  if (campaignMeta && campaignMeta.id) {
+    renderTrackedLinksPanel(wrap, campaignMeta.id, campaignMeta.offerUrl || '');
+  }
+}
+
+// ---- Tracked links (attached per campaign) ----
+function renderTrackedLinksPanel(wrap, campaignId, defaultUrl) {
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.id = 'trackedLinksPanel';
+  panel.innerHTML = `
+    <h3 style="font-size:1rem; margin-bottom:10px;">🔗 Tracked links for this campaign</h3>
+    <div id="trackedLinksList">Loading…</div>
+    <div style="margin-top:14px; border-top:1px solid var(--line); padding-top:14px;">
+      <div class="row">
+        <div class="field"><label>Link name</label><input type="text" id="tlName" placeholder="e.g. Main offer link"></div>
+        <div class="field"><label>Mode</label>
+          <select id="tlMode">
+            <option value="single">Single (just track clicks)</option>
+            <option value="rotate">Rotate (round robin)</option>
+            <option value="weighted">Weighted split</option>
+          </select>
+        </div>
+      </div>
+      <div class="field"><label>Destination URL(s) — one per line, optionally "URL, weight"</label>
+        <textarea id="tlUrls" rows="3" placeholder="${escapeHtml(defaultUrl || 'https://example.com/offer')}">${escapeHtml(defaultUrl || '')}</textarea>
+      </div>
+      <div class="row" style="align-items:center;">
+        <input type="file" id="tlCsvFile" accept=".csv" style="flex:1;">
+        <button class="btn btn-line" id="tlCsvLoadBtn">Load CSV into box above</button>
+      </div>
+      <button class="btn btn-gold" id="tlCreateBtn" style="margin-top:10px;">Create tracked link</button>
+      <div class="msg" id="tlCreateMsg"></div>
+    </div>
+  `;
+  wrap.appendChild(panel);
+
+  document.getElementById('tlCsvLoadBtn').addEventListener('click', () => {
+    const file = document.getElementById('tlCsvFile').files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const lines = e.target.result.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      // Assume first column is URL, optional second column is weight; skip an obvious header row.
+      const rows = lines.filter(l => /^https?:\/\//i.test(l.split(',')[0]));
+      document.getElementById('tlUrls').value = rows.join('\n');
+    };
+    reader.readAsText(file);
+  });
+
+  document.getElementById('tlCreateBtn').addEventListener('click', async () => {
+    const msg = document.getElementById('tlCreateMsg');
+    const name = document.getElementById('tlName').value.trim();
+    const mode = document.getElementById('tlMode').value;
+    const lines = document.getElementById('tlUrls').value.split('\n').map(l => l.trim()).filter(Boolean);
+    const urls = lines.map(l => {
+      const parts = l.split(',');
+      return { url: parts[0].trim(), weight: parts[1] ? parseInt(parts[1].trim(), 10) || 1 : 1 };
+    });
+    if (!name) { msg.textContent = 'Give this link a name.'; msg.className = 'msg err'; return; }
+    if (!urls.length) { msg.textContent = 'Add at least one destination URL.'; msg.className = 'msg err'; return; }
+    try {
+      const res = await fetch(API + 'tracked-links', {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ name, campaignId, mode, urls })
+      });
+      const data = await res.json();
+      if (data.success) {
+        msg.textContent = 'Created.'; msg.className = 'msg ok';
+        document.getElementById('tlName').value = '';
+        loadTrackedLinksList(campaignId);
+      } else { msg.textContent = data.error; msg.className = 'msg err'; }
+    } catch (err) { msg.textContent = 'Could not reach the server.'; msg.className = 'msg err'; }
+  });
+
+  loadTrackedLinksList(campaignId);
+}
+
+async function loadTrackedLinksList(campaignId) {
+  const listEl = document.getElementById('trackedLinksList');
+  if (!listEl) return;
+  listEl.textContent = 'Loading…';
+  try {
+    const res = await fetch(API + 'tracked-links?campaignId=' + campaignId, { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) { listEl.textContent = data.error || 'Could not load.'; return; }
+    if (!data.links.length) { listEl.innerHTML = '<span style="color:var(--muted); font-size:.88rem;">No tracked links yet — create one below.</span>'; return; }
+
+    listEl.innerHTML = data.links.map(l => {
+      const shortUrl = `${window.location.origin}/go/${l.slug}`;
+      const destRows = l.destinations.map(d => {
+        const rate = d.click_count > 0 ? ((d.conversion_count / d.click_count) * 100).toFixed(1) : '0.0';
+        const isWinner = l.winner_destination_id === d.id;
+        return `<tr><td style="max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(d.url)}${isWinner ? ' 🏆' : ''}</td><td>${d.click_count}</td><td>${d.conversion_count}</td><td>${rate}%</td></tr>`;
+      }).join('');
+      return `
+        <div class="result-card" style="margin-bottom:10px;">
+          <div class="label">${escapeHtml(l.name)} — <span style="color:var(--wave); font-weight:400;">${l.mode}</span>${l.winner_destination_id ? ' <span style="color:var(--gold);">winner declared</span>' : ''}
+            <span>
+              <button class="copy-btn" data-copy-url="${shortUrl}">Copy link</button>
+              <button class="copy-btn" data-delete-link="${l.id}">Delete</button>
+            </span>
+          </div>
+          <div style="font-family:ui-monospace,monospace; font-size:.82rem; color:var(--wave); margin:6px 0 10px;">${shortUrl}</div>
+          <table style="font-size:.82rem;"><thead><tr><th>Destination</th><th>Clicks</th><th>Conv.</th><th>Rate</th></tr></thead><tbody>${destRows}</tbody></table>
+          ${l.destinations.length > 1 ? `
+          <div class="row" style="margin-top:10px; align-items:center;">
+            <label class="chip ${l.auto_declare ? 'on' : ''}" style="display:inline-flex;">
+              <input type="checkbox" data-auto-declare="${l.id}" ${l.auto_declare ? 'checked' : ''}> Auto-declare winner at
+            </label>
+            <input type="number" data-min-conv="${l.id}" value="${l.min_conversions_to_declare}" style="width:80px;" min="1"> conversions
+            ${l.winner_destination_id ? `<button class="btn btn-line" data-clear-winner="${l.id}" style="padding:6px 12px; font-size:.8rem;">Clear winner</button>` : ''}
+          </div>` : ''}
+        </div>`;
+    }).join('');
+
+    listEl.querySelectorAll('button[data-copy-url]').forEach(b => b.addEventListener('click', () => copyText(b.dataset.copyUrl)));
+    listEl.querySelectorAll('button[data-delete-link]').forEach(b => b.addEventListener('click', async () => {
+      if (!confirm('Delete this tracked link? This cannot be undone.')) return;
+      await fetch(API + 'tracked-links?id=' + b.dataset.deleteLink, { method: 'DELETE', headers: authHeaders() });
+      loadTrackedLinksList(campaignId);
+    }));
+    listEl.querySelectorAll('input[data-auto-declare]').forEach(cb => cb.addEventListener('change', async () => {
+      await fetch(API + 'tracked-link-settings?id=' + cb.dataset.autoDeclare, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ autoDeclare: cb.checked }) });
+    }));
+    listEl.querySelectorAll('input[data-min-conv]').forEach(inp => inp.addEventListener('change', async () => {
+      await fetch(API + 'tracked-link-settings?id=' + inp.dataset.minConv, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ minConversionsToDeclare: parseInt(inp.value, 10) || 20 }) });
+    }));
+    listEl.querySelectorAll('button[data-clear-winner]').forEach(b => b.addEventListener('click', async () => {
+      await fetch(API + 'tracked-link-settings?id=' + b.dataset.clearWinner, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ clearWinner: true }) });
+      loadTrackedLinksList(campaignId);
+    }));
+  } catch (err) {
+    listEl.textContent = 'Could not reach the server.';
+  }
 }
 
 async function postNow(btn, platform, content) {
@@ -786,7 +922,7 @@ async function openCampaign(id) {
     document.getElementById('campOffer').value = data.campaign.offer_url || '';
     document.getElementById('campAudience').value = data.campaign.target_audience || '';
     document.getElementById('campBenefit').value = data.campaign.main_benefit || '';
-    renderResults(data.assets, { name: data.campaign.name });
+    renderResults(data.assets, { id: data.campaign.id, name: data.campaign.name, offerUrl: data.campaign.offer_url });
   } catch (err) { /* noop */ }
 }
 
