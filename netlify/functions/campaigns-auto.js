@@ -1,12 +1,46 @@
-// netlify/functions/campaigns-create.js — manual campaign builder endpoint.
-// Enforces tier limits SERVER-SIDE, calls the user's own AI provider key
-// (BYOK, never stored), and persists the campaign + assets to Postgres.
+// netlify/functions/campaigns-auto.js — one-click generation.
+// Takes just a URL, product name, or rough idea. If it looks like a URL,
+// makes a best-effort fetch of the page and extracts rough text as extra
+// context. The AI is then asked to infer the full campaign brief (name,
+// audience, benefit, tone) itself before writing every requested module —
+// all in a single provider call, one click, no form-filling.
 const { query } = require('../../lib/db');
 const { requireAuth } = require('../../lib/auth');
 const { callProvider } = require('../../lib/ai-provider');
 const { TIERS } = require('../../lib/tiers');
 const { getEffectiveUserId } = require('../../lib/workspace');
 const { buildPrompt, stripFences, assetsFromParsed, persistCampaign, fireZapierWebhook } = require('../../lib/campaign-engine');
+
+const URL_RE = /^https?:\/\/\S+$/i;
+
+function stripHtml(html) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function fetchPageText(url) {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; PulseForgeBot/1.0)' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('text/html')) return null;
+    const html = await res.text();
+    return stripHtml(html).slice(0, 4000);
+  } catch {
+    return null; // best-effort only — generation proceeds without it
+  }
+}
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -22,13 +56,9 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Invalid JSON body.' }) };
   }
 
-  const { provider, apiKey, model, campaign, platforms = [], modules = [], language = 'en', voiceId = null, complianceCheck = false } = body;
-  const name = (campaign?.name || '').trim();
-
-  if (!name) return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Campaign name is required.' }) };
-  if (platforms.length === 0 && modules.filter((m) => m !== 'platform_post').length === 0) {
-    return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Select at least one platform or module.' }) };
-  }
+  const { provider, apiKey, model, input, language = 'en', voiceId = null, complianceCheck = true } = body;
+  const rawInput = (input || '').trim();
+  if (!rawInput) return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Paste a URL, product name, or idea first.' }) };
 
   try {
     const effectiveUserId = await getEffectiveUserId(payload.sub);
@@ -37,17 +67,9 @@ exports.handler = async (event) => {
     const tierName = userRow.rows[0]?.tier || 'free';
     const tier = TIERS[tierName] || TIERS.free;
 
-    const disallowedPlatform = platforms.find((p) => !tier.allowedPlatforms.includes(p));
-    if (disallowedPlatform) {
-      return { statusCode: 403, body: JSON.stringify({ success: false, code: 'TIER_PLATFORM', error: `Your ${tier.label} plan doesn't include ${disallowedPlatform}. Upgrade to unlock it.` }) };
-    }
-    if (platforms.length > tier.maxPlatforms) {
-      return { statusCode: 403, body: JSON.stringify({ success: false, code: 'TIER_PLATFORM_COUNT', error: `Your ${tier.label} plan allows up to ${tier.maxPlatforms} platforms per campaign.` }) };
-    }
-    const disallowedModule = modules.find((m) => !tier.modules.includes(m));
-    if (disallowedModule) {
-      return { statusCode: 403, body: JSON.stringify({ success: false, code: 'TIER_MODULE', error: `Your ${tier.label} plan doesn't include the "${disallowedModule}" module. Upgrade to unlock it.` }) };
-    }
+    // One-click mode always requests everything the tier allows.
+    const platforms = tier.allowedPlatforms.slice(0, tier.maxPlatforms);
+    const modules = tier.modules;
 
     if (tier.totalCampaignCap != null) {
       const totalResult = await query('SELECT COUNT(*)::int AS n FROM campaigns WHERE user_id = $1', [effectiveUserId]);
@@ -68,13 +90,15 @@ exports.handler = async (event) => {
       voice = voiceResult.rows[0] || null;
     }
 
+    let pageText = null;
+    if (URL_RE.test(rawInput)) {
+      pageText = await fetchPageText(rawInput);
+    }
+
     const prompt = buildPrompt({
-      inferMode: false,
-      name,
-      offerUrl: campaign.offerUrl,
-      targetAudience: campaign.targetAudience,
-      mainBenefit: campaign.mainBenefit,
-      tone: campaign.tone,
+      inferMode: true,
+      rawInput,
+      pageText,
       platforms,
       modules,
       language,
@@ -85,9 +109,9 @@ exports.handler = async (event) => {
     const aiResult = await callProvider(provider, {
       apiKey,
       model,
-      systemPrompt: 'You write real, finished marketing campaign copy and reply with strict JSON only.',
+      systemPrompt: 'You are an autonomous marketing campaign agent. Infer the full campaign brief from the input, then write real, finished campaign copy. Reply with strict JSON only.',
       userPrompt: prompt,
-      maxTokens: 3000,
+      maxTokens: 3200,
     });
 
     if (!aiResult.success) {
@@ -101,10 +125,16 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: JSON.stringify({ success: false, code: 'PARSE_FAILED', error: 'The AI response could not be parsed as JSON.', rawText: aiResult.text }) };
     }
 
+    const brief = parsed.campaign_brief || {};
+    const name = (brief.name || rawInput.slice(0, 60) || 'Untitled Campaign').trim();
+    const targetAudience = brief.target_audience || null;
+    const mainBenefit = brief.main_benefit || null;
+    const tone = ['direct', 'playful', 'authority', 'story'].includes(brief.tone) ? brief.tone : 'direct';
+    const offerUrl = URL_RE.test(rawInput) ? rawInput : null;
+
     const { assetsToInsert, complianceNotes } = assetsFromParsed(parsed, complianceCheck);
     const { campaignId, createdAt } = await persistCampaign({
-      userId: effectiveUserId, name, offerUrl: campaign.offerUrl, targetAudience: campaign.targetAudience,
-      mainBenefit: campaign.mainBenefit, tone: campaign.tone, platforms, modules, language,
+      userId: effectiveUserId, name, offerUrl, targetAudience, mainBenefit, tone, platforms, modules, language,
       voiceId: voice?.id, complianceNotes, assetsToInsert,
     });
 
@@ -114,8 +144,9 @@ exports.handler = async (event) => {
       statusCode: 200,
       body: JSON.stringify({
         success: true,
-        campaign: { id: campaignId, name, createdAt, platforms, modules, language },
+        campaign: { id: campaignId, name, createdAt, platforms, modules, language, targetAudience, mainBenefit, tone },
         assets: assetsToInsert,
+        pageFetched: !!pageText,
       }),
     };
   } catch (err) {

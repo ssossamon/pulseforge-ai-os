@@ -45,6 +45,18 @@
         <p>One offer becomes a full set of platform posts, hooks, CTAs, and email copy — generated live with your own AI key.</p>
       </div>
 
+      <div class="panel" style="border-color:var(--gold);">
+        <div class="field">
+          <label for="autoInput">⚡ One-click: paste a URL, product name, or rough idea</label>
+          <textarea id="autoInput" rows="2" placeholder="e.g. https://yoursite.com/product  —or—  Our new cast-iron skillet, pre-seasoned, lifetime warranty"></textarea>
+        </div>
+        <button class="btn btn-gold" id="autoGenerateBtn">Generate now</button>
+        <span style="color:var(--muted); font-size:.82rem; margin-left:10px;">The AI figures out the audience, benefit, and tone itself — no form to fill.</span>
+        <div class="status-line" id="autoStatus"></div>
+      </div>
+
+      <p style="text-align:center; color:var(--muted); font-size:.85rem; margin:6px 0 20px;">— or build it manually below for full control —</p>
+
       <div class="panel">
         <div class="row" style="align-items:center;">
           <div class="field" style="flex:2;"><label for="templateSelect">Start from a template (optional)</label>
@@ -518,6 +530,54 @@ function selectedPlatforms() { return [...document.querySelectorAll('#platformCh
 function selectedModules() { return [...document.querySelectorAll('#moduleChips input:checked')].map(i => i.value); }
 function escapeHtml(s){ return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 function copyText(text) { navigator.clipboard.writeText(text).catch(() => {}); }
+
+document.getElementById('autoGenerateBtn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('autoStatus');
+  const s = store.get('aiSettings', {});
+  const input = document.getElementById('autoInput').value.trim();
+  const language = document.getElementById('languageSelect').value;
+  const voiceId = document.getElementById('voiceSelect').value || null;
+  const complianceCheck = document.getElementById('complianceCheckbox').checked;
+
+  if (!input) { statusEl.textContent = 'Paste a URL, product name, or idea first.'; statusEl.style.color = 'var(--err)'; return; }
+  if (!s.apiKey) { statusEl.textContent = 'Add your AI provider key in Settings first.'; statusEl.style.color = 'var(--err)'; return; }
+
+  const btn = document.getElementById('autoGenerateBtn');
+  btn.disabled = true; statusEl.style.color = 'var(--muted)'; statusEl.textContent = 'Agent working — inferring the brief, then generating everything…';
+
+  try {
+    const res = await fetch(API + 'campaigns-auto', {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ provider: s.provider, apiKey: s.apiKey, model: s.model, input, language, voiceId, complianceCheck })
+    });
+    const data = await res.json();
+    btn.disabled = false;
+
+    if (!data.success) {
+      if (data.code === 'PARSE_FAILED' && data.rawText) {
+        statusEl.textContent = 'The AI response could not be parsed as JSON — raw response below.';
+        statusEl.style.color = 'var(--err)';
+        renderRawFallback(data.rawText);
+        return;
+      }
+      statusEl.textContent = `Generation failed: ${data.error}`; statusEl.style.color = 'var(--err)';
+      return;
+    }
+
+    const fetchNote = data.pageFetched ? ' (read the page content too)' : '';
+    statusEl.textContent = `Done — inferred "${data.campaign.name}" for ${data.campaign.targetAudience || 'a general audience'}${fetchNote}.`;
+    statusEl.style.color = 'var(--ok)';
+    document.getElementById('campName').value = data.campaign.name;
+    document.getElementById('campAudience').value = data.campaign.targetAudience || '';
+    document.getElementById('campBenefit').value = data.campaign.mainBenefit || '';
+    document.getElementById('toneSelect').value = data.campaign.tone || 'direct';
+    renderResults(data.assets, data.campaign);
+    document.getElementById('autoInput').value = '';
+  } catch (err) {
+    btn.disabled = false;
+    statusEl.textContent = 'Could not reach the server.'; statusEl.style.color = 'var(--err)';
+  }
+});
 
 document.getElementById('generateBtn').addEventListener('click', async () => {
   const statusEl = document.getElementById('genStatus');

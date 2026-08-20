@@ -1,14 +1,18 @@
 // netlify/functions/brand-voices.js — GET (list), POST (create), DELETE (?id=)
+// Shared across a team workspace, same as campaigns/templates.
 const { query } = require('../../lib/db');
 const { requireAuth } = require('../../lib/auth');
+const { getEffectiveUserId } = require('../../lib/workspace');
 
 exports.handler = async (event) => {
   const payload = requireAuth(event);
   if (!payload) return { statusCode: 401, body: JSON.stringify({ success: false, error: 'Not signed in.' }) };
 
   try {
+    const effectiveUserId = await getEffectiveUserId(payload.sub);
+
     if (event.httpMethod === 'GET') {
-      const result = await query('SELECT * FROM brand_voices WHERE user_id = $1 ORDER BY created_at DESC', [payload.sub]);
+      const result = await query('SELECT * FROM brand_voices WHERE user_id = $1 ORDER BY created_at DESC', [effectiveUserId]);
       return { statusCode: 200, body: JSON.stringify({ success: true, voices: result.rows }) };
     }
 
@@ -19,7 +23,7 @@ exports.handler = async (event) => {
       const result = await query(
         `INSERT INTO brand_voices (user_id, name, tone_notes, signature_phrases, banned_words)
          VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-        [payload.sub, name, body.toneNotes || null, body.signaturePhrases || null, body.bannedWords || null]
+        [effectiveUserId, name, body.toneNotes || null, body.signaturePhrases || null, body.bannedWords || null]
       );
       return { statusCode: 200, body: JSON.stringify({ success: true, voice: result.rows[0] }) };
     }
@@ -27,7 +31,7 @@ exports.handler = async (event) => {
     if (event.httpMethod === 'DELETE') {
       const id = event.queryStringParameters?.id;
       if (!id) return { statusCode: 400, body: JSON.stringify({ success: false, error: 'id is required.' }) };
-      const result = await query('DELETE FROM brand_voices WHERE id = $1 AND user_id = $2 RETURNING id', [id, payload.sub]);
+      const result = await query('DELETE FROM brand_voices WHERE id = $1 AND user_id = $2 RETURNING id', [id, effectiveUserId]);
       if (result.rows.length === 0) return { statusCode: 404, body: JSON.stringify({ success: false, error: 'Not found.' }) };
       return { statusCode: 200, body: JSON.stringify({ success: true }) };
     }
