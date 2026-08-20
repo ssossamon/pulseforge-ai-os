@@ -4,51 +4,7 @@
 // than pretending it posted.
 const { query } = require('../../lib/db');
 const { requireAuth } = require('../../lib/auth');
-
-async function postToX(connection, content) {
-  const res = await fetch('https://api.twitter.com/2/tweets', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connection.access_token}` },
-    body: JSON.stringify({ text: content.slice(0, 280) }),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    if (res.status === 401) return { success: false, error: 'X connection expired. Reconnect your account in Settings.' };
-    return { success: false, error: `X rejected the post: ${data?.detail || data?.title || 'unknown error'}` };
-  }
-  return { success: true, url: `https://x.com/i/web/status/${data.data.id}` };
-}
-
-async function postToLinkedIn(connection, content) {
-  if (!connection.platform_account_id) {
-    return { success: false, error: 'LinkedIn connection is missing account info. Reconnect your account in Settings.' };
-  }
-  const res = await fetch('https://api.linkedin.com/v2/ugcPosts', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${connection.access_token}`,
-      'X-Restli-Protocol-Version': '2.0.0',
-    },
-    body: JSON.stringify({
-      author: connection.platform_account_id,
-      lifecycleState: 'PUBLISHED',
-      specificContent: {
-        'com.linkedin.ugc.ShareContent': {
-          shareCommentary: { text: content },
-          shareMediaCategory: 'NONE',
-        },
-      },
-      visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' },
-    }),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    if (res.status === 401) return { success: false, error: 'LinkedIn connection expired. Reconnect your account in Settings.' };
-    return { success: false, error: `LinkedIn rejected the post: ${data?.message || 'unknown error'}` };
-  }
-  return { success: true };
-}
+const { postToPlatform } = require('../../lib/social-post-helpers');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -64,8 +20,8 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Invalid JSON body.' }) };
   }
   const { platform, content } = body;
-  if (!['x', 'linkedin'].includes(platform)) {
-    return { statusCode: 400, body: JSON.stringify({ success: false, error: 'platform must be "x" or "linkedin".' }) };
+  if (!['x', 'linkedin', 'facebook', 'threads'].includes(platform)) {
+    return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Unsupported platform.' }) };
   }
   if (!content || !content.trim()) {
     return { statusCode: 400, body: JSON.stringify({ success: false, error: 'No content to post.' }) };
@@ -75,10 +31,11 @@ exports.handler = async (event) => {
     const connResult = await query('SELECT * FROM social_connections WHERE user_id = $1 AND platform = $2', [payload.sub, platform]);
     const connection = connResult.rows[0];
     if (!connection) {
-      return { statusCode: 404, body: JSON.stringify({ success: false, code: 'NOT_CONNECTED', error: `You haven't connected a ${platform === 'x' ? 'X' : 'LinkedIn'} account yet. Connect it in Settings.` }) };
+      const labels = { x: 'X', linkedin: 'LinkedIn', facebook: 'Facebook', threads: 'Threads' };
+      return { statusCode: 404, body: JSON.stringify({ success: false, code: 'NOT_CONNECTED', error: `You haven't connected a ${labels[platform]} account yet. Connect it in Settings.` }) };
     }
 
-    const result = platform === 'x' ? await postToX(connection, content) : await postToLinkedIn(connection, content);
+    const result = await postToPlatform(platform, connection, content);
     return { statusCode: result.success ? 200 : 502, body: JSON.stringify(result) };
   } catch (err) {
     if (err.message === 'NO_DATABASE_CONFIGURED') {

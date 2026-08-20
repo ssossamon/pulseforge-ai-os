@@ -6,7 +6,7 @@ const { requireAuth } = require('../../lib/auth');
 const { callProvider } = require('../../lib/ai-provider');
 const { TIERS } = require('../../lib/tiers');
 const { getEffectiveUserId } = require('../../lib/workspace');
-const { buildPrompt, stripFences, assetsFromParsed, persistCampaign, fireZapierWebhook } = require('../../lib/campaign-engine');
+const { buildPrompt, stripFences, assetsFromParsed, persistCampaign, fireZapierWebhook, autoPostToConnectedAccounts } = require('../../lib/campaign-engine');
 const { generateCampaignImage } = require('../../lib/ai-image');
 
 exports.handler = async (event) => {
@@ -23,7 +23,7 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Invalid JSON body.' }) };
   }
 
-  const { provider, apiKey, model, campaign, platforms = [], modules = [], language = 'en', voiceId = null, complianceCheck = false, imageApiKey = null } = body;
+  const { provider, apiKey, model, campaign, platforms = [], modules = [], language = 'en', voiceId = null, complianceCheck = false, imageApiKey = null, autoPost = false } = body;
   const name = (campaign?.name || '').trim();
 
   if (!name) return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Campaign name is required.' }) };
@@ -114,6 +114,14 @@ exports.handler = async (event) => {
         } else {
           assetsToInsert.push({ module: 'campaign_image', platform: null, label: 'Campaign Image', content: `Image generation failed: ${imgResult.error}` });
         }
+      }
+    }
+
+    if (autoPost) {
+      const postResults = await autoPostToConnectedAccounts(effectiveUserId, assetsToInsert);
+      if (postResults.length) {
+        const summary = postResults.map((r) => `${r.platform.toUpperCase()}: ${r.success ? 'Posted ✓' + (r.url ? ` — ${r.url}` : '') : `Failed — ${r.error}`}`).join('\n');
+        assetsToInsert.push({ module: 'auto_post_summary', platform: null, label: 'Auto-post results', content: summary });
       }
     }
 

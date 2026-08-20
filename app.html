@@ -102,6 +102,9 @@
           <label class="chip on" style="display:inline-flex;" id="complianceChip">
             <input type="checkbox" id="complianceCheckbox" checked> Run compliance/claims check
           </label>
+          <label class="chip" style="display:inline-flex; margin-left:8px;" id="autoPostChip">
+            <input type="checkbox" id="autoPostCheckbox"> 🚀 Auto-post to connected accounts
+          </label>
         </div>
 
         <div class="field">
@@ -538,6 +541,13 @@ function selectedModules() { return [...document.querySelectorAll('#moduleChips 
 function escapeHtml(s){ return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 function copyText(text) { navigator.clipboard.writeText(text).catch(() => {}); }
 
+document.getElementById('complianceCheckbox').addEventListener('change', (e) => {
+  document.getElementById('complianceChip').classList.toggle('on', e.target.checked);
+});
+document.getElementById('autoPostCheckbox').addEventListener('change', (e) => {
+  document.getElementById('autoPostChip').classList.toggle('on', e.target.checked);
+});
+
 document.getElementById('autoGenerateBtn').addEventListener('click', async () => {
   const statusEl = document.getElementById('autoStatus');
   const s = store.get('aiSettings', {});
@@ -555,7 +565,7 @@ document.getElementById('autoGenerateBtn').addEventListener('click', async () =>
   try {
     const res = await fetch(API + 'campaigns-auto', {
       method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({ provider: s.provider, apiKey: s.apiKey, model: s.model, input, language, voiceId, complianceCheck, imageApiKey: s.imageApiKey, includeImage: !!s.imageApiKey })
+      body: JSON.stringify({ provider: s.provider, apiKey: s.apiKey, model: s.model, input, language, voiceId, complianceCheck, imageApiKey: s.imageApiKey, includeImage: !!s.imageApiKey, autoPost: document.getElementById('autoPostCheckbox').checked })
     });
     const data = await res.json();
     btn.disabled = false;
@@ -614,7 +624,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
   try {
     const res = await fetch(API + 'campaigns-create', {
       method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({ provider: s.provider, apiKey: s.apiKey, model: s.model, campaign, platforms, modules, language, voiceId, complianceCheck, imageApiKey: s.imageApiKey })
+      body: JSON.stringify({ provider: s.provider, apiKey: s.apiKey, model: s.model, campaign, platforms, modules, language, voiceId, complianceCheck, imageApiKey: s.imageApiKey, autoPost: document.getElementById('autoPostCheckbox').checked })
     });
     const data = await res.json();
     btn.disabled = false;
@@ -677,7 +687,7 @@ function renderResults(assets, campaignMeta) {
       return;
     }
 
-    const postBtn = (a.platform === 'x' || a.platform === 'linkedin')
+    const postBtn = ['x', 'linkedin', 'facebook', 'threads'].includes(a.platform)
       ? `<button class="copy-btn" data-post="${a.platform}">Post now</button>`
       : '';
     card.innerHTML = `<div class="label">${escapeHtml(a.label)}<span><button class="copy-btn">Copy</button> ${postBtn}</span></div><pre>${escapeHtml(a.content)}</pre>`;
@@ -820,6 +830,8 @@ async function loadSocialConnections() {
     const platforms = [
       { key: 'x', label: 'X / Twitter' },
       { key: 'linkedin', label: 'LinkedIn' },
+      { key: 'facebook', label: 'Facebook Page' },
+      { key: 'threads', label: 'Threads' },
     ];
     wrap.innerHTML = platforms.map(p => {
       const conn = data.connections.find(c => c.platform === p.key);
