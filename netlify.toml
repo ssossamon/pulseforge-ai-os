@@ -9,8 +9,6 @@
 [[redirects]]
   from = "/go/*"
   to = "/.netlify/functions/go?slug=:splat"
-  status = 200
-  force = true
 
 [[headers]]
   for = "/*"
