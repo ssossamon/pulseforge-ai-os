@@ -83,6 +83,9 @@ exports.handler = async (event) => {
     if (err.message === 'NO_DATABASE_CONFIGURED') {
       return { statusCode: 501, body: JSON.stringify({ success: false, error: 'Database not configured yet.' }) };
     }
+    if (err.code === '23503') {
+      return { statusCode: 400, body: JSON.stringify({ success: false, error: 'That campaign no longer exists — refresh and try again.' }) };
+    }
     return { statusCode: 500, body: JSON.stringify({ success: false, error: err.message }) };
   }
 };
