@@ -25,6 +25,7 @@
     <nav class="side">
       <button data-view="generate" class="active">Campaign builder</button>
       <button data-view="history">Campaign history</button>
+      <button data-view="voices">Brand voice</button>
       <button data-view="settings">AI settings</button>
       <button data-view="license">License</button>
     </nav>
@@ -44,6 +45,12 @@
       </div>
 
       <div class="panel">
+        <div class="row" style="align-items:center;">
+          <div class="field" style="flex:2;"><label for="templateSelect">Start from a template (optional)</label>
+            <select id="templateSelect"><option value="">— None —</option></select>
+          </div>
+          <div class="field" style="flex:1; align-self:flex-end;"><button class="btn btn-line" id="saveTemplateBtn" style="width:100%;">Save as template</button></div>
+        </div>
         <div class="row">
           <div class="field"><label for="campName">Campaign name</label><input type="text" id="campName" placeholder="e.g. Skillet Spring Launch"></div>
           <div class="field"><label for="campOffer">Offer / URL / product</label><input type="text" id="campOffer" placeholder="https://... or a product description"></div>
@@ -62,6 +69,26 @@
               <option value="story">Storytelling</option>
             </select>
           </div>
+          <div class="field">
+            <label for="languageSelect">Language</label>
+            <select id="languageSelect">
+              <option value="en">English</option>
+              <option value="es">Spanish</option>
+              <option value="pt">Portuguese</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="tl">Tagalog</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="voiceSelect">Brand voice (optional)</label>
+            <select id="voiceSelect"><option value="">— None —</option></select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="chip on" style="display:inline-flex;" id="complianceChip">
+            <input type="checkbox" id="complianceCheckbox" checked> Run compliance/claims check
+          </label>
         </div>
 
         <div class="field">
@@ -108,6 +135,31 @@
           <tbody id="historyBody"></tbody>
         </table>
         <div id="historyEmpty" class="msg" style="color:var(--muted);">No campaigns yet.</div>
+      </div>
+    </section>
+
+    <!-- BRAND VOICE -->
+    <section class="view" id="view-voices">
+      <div class="view-head">
+        <h2>Brand voice</h2>
+        <p>Save a tone once, apply it to every campaign. Selected in the campaign builder's "Brand voice" dropdown.</p>
+      </div>
+      <div class="panel">
+        <div class="field"><label for="voiceName">Voice name</label><input type="text" id="voiceName" placeholder="e.g. Main brand voice"></div>
+        <div class="field"><label for="voiceTone">Tone description</label><textarea id="voiceTone" rows="2" placeholder="e.g. warm, plainspoken, a little irreverent, never salesy"></textarea></div>
+        <div class="row">
+          <div class="field"><label for="voiceSig">Favor these words/phrases</label><input type="text" id="voiceSig" placeholder="comma-separated"></div>
+          <div class="field"><label for="voiceBanned">Never use these words/phrases</label><input type="text" id="voiceBanned" placeholder="comma-separated"></div>
+        </div>
+        <button class="btn btn-gold" id="saveVoiceBtn">Save voice</button>
+        <div class="msg" id="voiceMsg"></div>
+      </div>
+      <div class="panel">
+        <h3 style="font-size:1rem;">Saved voices</h3>
+        <table>
+          <thead><tr><th>Name</th><th>Tone</th><th></th></tr></thead>
+          <tbody id="voicesBody"></tbody>
+        </table>
       </div>
     </section>
 
@@ -190,6 +242,8 @@ async function boot() {
     applyTierUI();
     loadSettingsIntoForm();
     populateModels();
+    loadVoices();
+    loadTemplates();
   } catch (err) {
     document.getElementById('loadingGate').textContent = 'Could not reach the server. Refresh to try again.';
   }
@@ -231,7 +285,102 @@ document.querySelectorAll('nav.side button').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('view-' + btn.dataset.view).classList.add('active');
     if (btn.dataset.view === 'history') loadHistory();
+    if (btn.dataset.view === 'voices') loadVoices();
   });
+});
+
+// ---- Brand voices ----
+let voicesCache = [];
+async function loadVoices() {
+  try {
+    const res = await fetch(API + 'brand-voices', { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) return;
+    voicesCache = data.voices;
+    const sel = document.getElementById('voiceSelect');
+    sel.innerHTML = '<option value="">— None —</option>' + voicesCache.map(v => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join('');
+    const body = document.getElementById('voicesBody');
+    if (body) {
+      body.innerHTML = voicesCache.map(v => `<tr><td>${escapeHtml(v.name)}</td><td>${escapeHtml((v.tone_notes||'').slice(0,60))}</td><td><button class="copy-btn" data-id="${v.id}">Delete</button></td></tr>`).join('') || '<tr><td colspan="3">No saved voices yet.</td></tr>';
+      body.querySelectorAll('button[data-id]').forEach(b => b.addEventListener('click', async () => {
+        await fetch(API + 'brand-voices?id=' + b.dataset.id, { method: 'DELETE', headers: authHeaders() });
+        loadVoices();
+      }));
+    }
+  } catch (err) { /* noop */ }
+}
+document.getElementById('saveVoiceBtn').addEventListener('click', async () => {
+  const name = document.getElementById('voiceName').value.trim();
+  const msg = document.getElementById('voiceMsg');
+  if (!name) { msg.textContent = 'Give this voice a name.'; msg.className = 'msg err'; return; }
+  try {
+    const res = await fetch(API + 'brand-voices', {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({
+        name,
+        toneNotes: document.getElementById('voiceTone').value.trim(),
+        signaturePhrases: document.getElementById('voiceSig').value.trim(),
+        bannedWords: document.getElementById('voiceBanned').value.trim(),
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      msg.textContent = 'Saved.'; msg.className = 'msg ok';
+      document.getElementById('voiceName').value = ''; document.getElementById('voiceTone').value = '';
+      document.getElementById('voiceSig').value = ''; document.getElementById('voiceBanned').value = '';
+      loadVoices();
+    } else { msg.textContent = data.error; msg.className = 'msg err'; }
+  } catch (err) { msg.textContent = 'Could not reach the server.'; msg.className = 'msg err'; }
+});
+
+// ---- Templates ----
+let templatesCache = [];
+async function loadTemplates() {
+  try {
+    const res = await fetch(API + 'templates', { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) return;
+    templatesCache = data.templates;
+    const sel = document.getElementById('templateSelect');
+    sel.innerHTML = '<option value="">— None —</option>' + templatesCache.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+  } catch (err) { /* noop */ }
+}
+document.getElementById('templateSelect').addEventListener('change', (e) => {
+  const t = templatesCache.find(x => String(x.id) === e.target.value);
+  if (!t) return;
+  document.getElementById('campOffer').value = t.offer_url || '';
+  document.getElementById('campAudience').value = t.target_audience || '';
+  document.getElementById('campBenefit').value = t.main_benefit || '';
+  document.getElementById('toneSelect').value = t.tone || 'direct';
+  document.getElementById('languageSelect').value = t.language || 'en';
+  (t.platforms || []).forEach(p => {
+    const chip = document.querySelector(`#platformChips .chip[data-platform="${p}"]`);
+    if (chip && !chip.classList.contains('disabled')) { chip.querySelector('input').checked = true; chip.classList.add('on'); }
+  });
+  (t.asset_modules || []).forEach(m => {
+    const chip = document.querySelector(`#moduleChips .chip[data-module="${m}"]`);
+    if (chip && !chip.classList.contains('disabled')) { chip.querySelector('input').checked = true; chip.classList.add('on'); }
+  });
+});
+document.getElementById('saveTemplateBtn').addEventListener('click', async () => {
+  const name = prompt('Name this template:');
+  if (!name) return;
+  try {
+    await fetch(API + 'templates', {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({
+        name,
+        offerUrl: document.getElementById('campOffer').value.trim(),
+        targetAudience: document.getElementById('campAudience').value.trim(),
+        mainBenefit: document.getElementById('campBenefit').value.trim(),
+        tone: document.getElementById('toneSelect').value,
+        language: document.getElementById('languageSelect').value,
+        platforms: selectedPlatforms(),
+        modules: selectedModules(),
+      })
+    });
+    loadTemplates();
+  } catch (err) { /* noop */ }
 });
 
 // ---- Chips ----
@@ -324,6 +473,9 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
   };
   const platforms = selectedPlatforms();
   const modules = selectedModules();
+  const language = document.getElementById('languageSelect').value;
+  const voiceId = document.getElementById('voiceSelect').value || null;
+  const complianceCheck = document.getElementById('complianceCheckbox').checked;
 
   if (!campaign.name) { statusEl.textContent = 'Give this campaign a name.'; statusEl.style.color = 'var(--err)'; return; }
   if (!s.apiKey) { statusEl.textContent = 'Add your AI provider key in Settings first.'; statusEl.style.color = 'var(--err)'; return; }
@@ -337,7 +489,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
   try {
     const res = await fetch(API + 'campaigns-create', {
       method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({ provider: s.provider, apiKey: s.apiKey, model: s.model, campaign, platforms, modules })
+      body: JSON.stringify({ provider: s.provider, apiKey: s.apiKey, model: s.model, campaign, platforms, modules, language, voiceId, complianceCheck })
     });
     const data = await res.json();
     btn.disabled = false;
@@ -449,11 +601,14 @@ async function loadHistory(q) {
       const tr = document.createElement('tr');
       const date = new Date(c.created_at).toLocaleString();
       const platforms = (c.platforms || []).map(p => PLATFORM_LABELS[p] || p).join(', ') || '—';
-      tr.innerHTML = `<td>${date}</td><td>${escapeHtml(c.name)}</td><td>${platforms}</td><td><button class="copy-btn" data-id="${c.id}">Open</button></td>`;
+      tr.innerHTML = `<td>${date}</td><td>${escapeHtml(c.name)}</td><td>${platforms}</td><td><button class="copy-btn" data-id="${c.id}" data-action="open">Open</button> <button class="copy-btn" data-id="${c.id}" data-action="dup">Duplicate</button></td>`;
       body.appendChild(tr);
     });
-    body.querySelectorAll('button[data-id]').forEach(btn => {
+    body.querySelectorAll('button[data-action="open"]').forEach(btn => {
       btn.addEventListener('click', () => openCampaign(btn.dataset.id));
+    });
+    body.querySelectorAll('button[data-action="dup"]').forEach(btn => {
+      btn.addEventListener('click', () => duplicateCampaign(btn.dataset.id));
     });
   } catch (err) {
     empty.textContent = 'Could not reach the server.'; empty.classList.remove('hidden');
@@ -475,6 +630,33 @@ async function openCampaign(id) {
 }
 
 document.getElementById('historySearchBtn').addEventListener('click', () => loadHistory(document.getElementById('historySearch').value.trim()));
+
+async function duplicateCampaign(id) {
+  try {
+    const res = await fetch(API + 'campaigns-get?id=' + id, { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) return;
+    document.querySelector('nav.side button[data-view="generate"]').click();
+    document.getElementById('campName').value = data.campaign.name ? data.campaign.name + ' (copy)' : '';
+    document.getElementById('campOffer').value = data.campaign.offer_url || '';
+    document.getElementById('campAudience').value = data.campaign.target_audience || '';
+    document.getElementById('campBenefit').value = data.campaign.main_benefit || '';
+    document.getElementById('toneSelect').value = data.campaign.tone || 'direct';
+    document.getElementById('languageSelect').value = data.campaign.language || 'en';
+    document.querySelectorAll('#platformChips input, #moduleChips input').forEach(i => { i.checked = false; i.closest('.chip').classList.remove('on'); });
+    (data.campaign.platforms || []).forEach(p => {
+      const chip = document.querySelector(`#platformChips .chip[data-platform="${p}"]`);
+      if (chip && !chip.classList.contains('disabled')) { chip.querySelector('input').checked = true; chip.classList.add('on'); }
+    });
+    (data.campaign.asset_modules || []).forEach(m => {
+      const chip = document.querySelector(`#moduleChips .chip[data-module="${m}"]`);
+      if (chip && !chip.classList.contains('disabled')) { chip.querySelector('input').checked = true; chip.classList.add('on'); }
+    });
+    document.getElementById('resultsWrap').innerHTML = '';
+    document.getElementById('genStatus').textContent = 'Loaded — edit anything, then hit Generate.';
+    document.getElementById('genStatus').style.color = 'var(--muted)';
+  } catch (err) { /* noop */ }
+}
 </script>
 </body>
 </html>

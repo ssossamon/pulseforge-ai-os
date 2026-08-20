@@ -21,8 +21,13 @@ const TONE_DESC = {
   story: 'storytelling, scene-setting, narrative hook',
 };
 
-function buildPrompt({ name, offerUrl, targetAudience, mainBenefit, tone, platforms, modules }) {
+const LANGUAGE_NAMES = {
+  en: 'English', es: 'Spanish', pt: 'Portuguese', fr: 'French', de: 'German', tl: 'Tagalog',
+};
+
+function buildPrompt({ name, offerUrl, targetAudience, mainBenefit, tone, platforms, modules, language, voice, complianceCheck }) {
   const toneDesc = TONE_DESC[tone] || TONE_DESC.direct;
+  const langName = LANGUAGE_NAMES[language] || 'English';
   const shape = {};
   const notes = [];
 
@@ -32,6 +37,9 @@ function buildPrompt({ name, offerUrl, targetAudience, mainBenefit, tone, platfo
       shape.platform_posts[p] = ['first version', 'a distinctly different second version'];
     });
     notes.push('platform_posts: give TWO distinct posts per platform, matching each platform\'s native format described below:\n' + platforms.map((p) => `- ${p}: ${PLATFORM_SPEC[p]}`).join('\n'));
+    shape.platform_posts_pick = {};
+    platforms.forEach((p) => { shape.platform_posts_pick[p] = { stronger: '1 or 2', reason: 'one short sentence on why that version is likely to perform better' }; });
+    notes.push('platform_posts_pick: for each platform, say which of the two versions (1 or 2) is likely stronger and one short reason why.');
   }
   if (modules.includes('viral_hook')) {
     shape.viral_hooks = ['hook 1', 'hook 2', 'hook 3'];
@@ -49,8 +57,19 @@ function buildPrompt({ name, offerUrl, targetAudience, mainBenefit, tone, platfo
     shape.email_promo = { subject: 'subject under 60 characters', body: '3-5 short paragraphs' };
     notes.push('email_promo: a subject line written to be opened, and a plain-text promotional email body.');
   }
+  if (complianceCheck) {
+    shape.compliance_notes = ['note 1', 'note 2'];
+    notes.push('compliance_notes: review everything you wrote above for risky claims — unsubstantiated health/financial/income claims, guaranteed-results language, missing required disclaimers. Return an array of short, specific warnings (one per issue found). Return an empty array if nothing looks risky. This is not legal advice, just a first-pass flag.');
+  }
 
-  return `You are a marketing copywriter writing real, ready-to-use campaign assets — not descriptions of what they'd look like.
+  const voiceBlock = voice
+    ? `\nBRAND VOICE (apply consistently across everything you write)
+Voice description: ${voice.tone_notes || '(none given)'}
+Favor these phrases/words where natural: ${voice.signature_phrases || '(none given)'}
+Never use these words/phrases: ${voice.banned_words || '(none given)'}\n`
+    : '';
+
+  return `You are a marketing copywriter writing real, ready-to-use campaign assets — not descriptions of what they'd look like. Write everything in ${langName}.
 
 CAMPAIGN
 Name: ${name}
@@ -58,14 +77,14 @@ Offer / URL / product: ${offerUrl || '(not provided — infer reasonably from th
 Target audience: ${targetAudience || '(not specified — infer a sensible general audience)'}
 Main benefit to emphasize: ${mainBenefit || '(not specified — infer the most compelling benefit from the offer)'}
 Tone: ${toneDesc}
-
+${voiceBlock}
 Write the following modules:
 ${notes.join('\n\n')}
 
 Return ONLY valid JSON, no markdown code fences, no commentary, in exactly this shape:
 ${JSON.stringify(shape, null, 2)}
 
-Every value must be the finished, ready-to-use copy itself. Do not invent statistics, testimonials, or claims not reasonably implied by the input.`;
+Every value must be the finished, ready-to-use copy itself, written in ${langName}. Do not invent statistics, testimonials, or claims not reasonably implied by the input.`;
 }
 
 function stripFences(text) {
@@ -86,7 +105,7 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Invalid JSON body.' }) };
   }
 
-  const { provider, apiKey, model, campaign, platforms = [], modules = [] } = body;
+  const { provider, apiKey, model, campaign, platforms = [], modules = [], language = 'en', voiceId = null, complianceCheck = false } = body;
   const name = (campaign?.name || '').trim();
 
   if (!name) return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Campaign name is required.' }) };
@@ -125,6 +144,12 @@ exports.handler = async (event) => {
       }
     }
 
+    let voice = null;
+    if (voiceId) {
+      const voiceResult = await query('SELECT * FROM brand_voices WHERE id = $1 AND user_id = $2', [voiceId, payload.sub]);
+      voice = voiceResult.rows[0] || null;
+    }
+
     const prompt = buildPrompt({
       name,
       offerUrl: campaign.offerUrl,
@@ -133,6 +158,9 @@ exports.handler = async (event) => {
       tone: campaign.tone,
       platforms,
       modules,
+      language,
+      voice,
+      complianceCheck,
     });
 
     const aiResult = await callProvider(provider, {
@@ -155,18 +183,25 @@ exports.handler = async (event) => {
     }
 
     // Persist campaign + assets.
+    const complianceNotes = Array.isArray(parsed.compliance_notes) ? parsed.compliance_notes : [];
     const campResult = await query(
-      `INSERT INTO campaigns (user_id, name, offer_url, target_audience, main_benefit, tone, platforms, asset_modules)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, created_at`,
-      [payload.sub, name, campaign.offerUrl || null, campaign.targetAudience || null, campaign.mainBenefit || null, campaign.tone || 'direct', platforms, modules]
+      `INSERT INTO campaigns (user_id, name, offer_url, target_audience, main_benefit, tone, platforms, asset_modules, language, voice_id, compliance_notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, created_at`,
+      [payload.sub, name, campaign.offerUrl || null, campaign.targetAudience || null, campaign.mainBenefit || null, campaign.tone || 'direct', platforms, modules, language, voice?.id || null, complianceNotes]
     );
     const campaignId = campResult.rows[0].id;
     const assetsToInsert = [];
 
     if (parsed.platform_posts) {
+      const picks = parsed.platform_posts_pick || {};
       Object.entries(parsed.platform_posts).forEach(([platform, posts]) => {
+        const pick = picks[platform];
         (Array.isArray(posts) ? posts : [posts]).forEach((content, idx) => {
-          assetsToInsert.push({ module: 'platform_post', platform, label: `${platform.toUpperCase()} Post #${idx + 1}`, content });
+          const versionNum = idx + 1;
+          const isPicked = pick && String(pick.stronger) === String(versionNum);
+          const label = `${platform.toUpperCase()} Post #${versionNum}${isPicked ? ' ⭐ Stronger pick' : ''}`;
+          const finalContent = isPicked && pick.reason ? `${content}\n\n[AI note: ${pick.reason}]` : content;
+          assetsToInsert.push({ module: 'platform_post', platform, label, content: finalContent });
         });
       });
     }
@@ -182,6 +217,12 @@ exports.handler = async (event) => {
     if (parsed.email_promo) {
       assetsToInsert.push({ module: 'email_promo', platform: null, label: 'Email Promo', content: `Subject: ${parsed.email_promo.subject}\n\n${parsed.email_promo.body}` });
     }
+    if (complianceCheck) {
+      const notesText = complianceNotes.length
+        ? complianceNotes.map((n, i) => `${i + 1}. ${n}`).join('\n')
+        : 'No risky claims flagged. This is an AI first pass, not legal advice — have a human review before publishing regulated-niche content.';
+      assetsToInsert.push({ module: 'compliance_check', platform: null, label: 'Compliance Check', content: notesText });
+    }
 
     for (const a of assetsToInsert) {
       await query('INSERT INTO assets (campaign_id, module, platform, label, content) VALUES ($1,$2,$3,$4,$5)', [campaignId, a.module, a.platform, a.label, a.content]);
@@ -191,7 +232,7 @@ exports.handler = async (event) => {
       statusCode: 200,
       body: JSON.stringify({
         success: true,
-        campaign: { id: campaignId, name, createdAt: campResult.rows[0].created_at, platforms, modules },
+        campaign: { id: campaignId, name, createdAt: campResult.rows[0].created_at, platforms, modules, language },
         assets: assetsToInsert,
       }),
     };
