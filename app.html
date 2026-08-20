@@ -156,10 +156,12 @@
 
 <script>
 const API = '/.netlify/functions/';
+// All tiers are currently fully unlocked (mirrors lib/tiers.js server-side config).
+const FULL_ACCESS_UI = { maxPlatforms: 5, allowedPlatforms: ['x','facebook','linkedin','threads'], modules: ['platform_post','email_promo','viral_hook','cta','video_hook'] };
 const TIER_LIMITS = {
-  free:       { maxPlatforms: 2, allowedPlatforms: ['x','facebook'], modules: ['platform_post','email_promo'], label: 'Free' },
-  starter:    { maxPlatforms: 5, allowedPlatforms: ['x','facebook','linkedin','threads'], modules: ['platform_post','email_promo','viral_hook','cta','video_hook'], label: 'Starter' },
-  enterprise: { maxPlatforms: 5, allowedPlatforms: ['x','facebook','linkedin','threads'], modules: ['platform_post','email_promo','viral_hook','cta','video_hook'], label: 'Enterprise' },
+  free:       { ...FULL_ACCESS_UI, label: 'Free' },
+  starter:    { ...FULL_ACCESS_UI, label: 'Starter' },
+  enterprise: { ...FULL_ACCESS_UI, label: 'Enterprise' },
 };
 const PLATFORM_LABELS = { x: 'X / Twitter', facebook: 'Facebook', linkedin: 'LinkedIn', threads: 'Threads' };
 
@@ -203,7 +205,7 @@ function applyTierUI() {
   const tier = TIER_LIMITS[currentUser.tier] || TIER_LIMITS.free;
   document.getElementById('planLabel').textContent = tier.label;
   document.getElementById('licenseCurrentPlan').textContent = tier.label;
-  document.getElementById('usageLabel').textContent = currentUser.tier === 'free' ? 'Up to 3 campaigns total' : (currentUser.tier === 'starter' ? 'Up to 20 campaigns, 5/day' : 'Unlimited campaigns');
+  document.getElementById('usageLabel').textContent = 'Unlimited campaigns';
 
   document.querySelectorAll('#platformChips .chip').forEach(chip => {
     const p = chip.dataset.platform;
