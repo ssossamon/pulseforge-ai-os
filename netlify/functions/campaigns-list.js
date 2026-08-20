@@ -1,25 +1,27 @@
 // netlify/functions/campaigns-list.js
 const { query } = require('../../lib/db');
 const { requireAuth } = require('../../lib/auth');
+const { getEffectiveUserId } = require('../../lib/workspace');
 
 exports.handler = async (event) => {
   const payload = requireAuth(event);
   if (!payload) return { statusCode: 401, body: JSON.stringify({ success: false, error: 'Not signed in.' }) };
 
   try {
+    const effectiveUserId = await getEffectiveUserId(payload.sub);
     const search = event.queryStringParameters?.q?.trim();
     let result;
     if (search) {
       result = await query(
         `SELECT id, name, offer_url, platforms, asset_modules, created_at FROM campaigns
          WHERE user_id = $1 AND name ILIKE $2 ORDER BY created_at DESC LIMIT 200`,
-        [payload.sub, `%${search}%`]
+        [effectiveUserId, `%${search}%`]
       );
     } else {
       result = await query(
         `SELECT id, name, offer_url, platforms, asset_modules, created_at FROM campaigns
          WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200`,
-        [payload.sub]
+        [effectiveUserId]
       );
     }
     return { statusCode: 200, body: JSON.stringify({ success: true, campaigns: result.rows }) };

@@ -26,6 +26,7 @@
       <button data-view="generate" class="active">Campaign builder</button>
       <button data-view="history">Campaign history</button>
       <button data-view="voices">Brand voice</button>
+      <button data-view="team">Team</button>
       <button data-view="settings">AI settings</button>
       <button data-view="license">License</button>
     </nav>
@@ -187,6 +188,55 @@
         <div class="status-line" id="connStatus"><span class="dot" id="connDot"></span><span id="connText">Not tested yet</span></div>
         <div class="diag hidden" id="connDiag"></div>
       </div>
+
+      <div class="panel">
+        <h3 style="font-size:1rem;">Social accounts</h3>
+        <p style="color:var(--muted); font-size:.88rem; margin-bottom:14px;">Connect your own X or LinkedIn account to post generated content directly, one click, no copy-paste.</p>
+        <div id="socialConnections">Loading…</div>
+      </div>
+
+      <div class="panel">
+        <h3 style="font-size:1rem;">Zapier webhook</h3>
+        <p style="color:var(--muted); font-size:.88rem; margin-bottom:14px;">Create a Zap with a "Catch Hook" trigger, paste the webhook URL Zapier gives you here. Every campaign you generate gets POSTed there automatically.</p>
+        <div class="row">
+          <input type="text" id="zapierUrlInput" placeholder="https://hooks.zapier.com/hooks/catch/...">
+          <button class="btn btn-gold" id="saveZapierBtn">Save</button>
+          <button class="btn btn-line" id="removeZapierBtn">Remove</button>
+        </div>
+        <div class="msg" id="zapierMsg"></div>
+      </div>
+    </section>
+
+    <!-- TEAM -->
+    <section class="view" id="view-team">
+      <div class="view-head">
+        <h2>Team</h2>
+        <p>Share your campaign workspace with teammates. They'll see and generate against your account's history and quota.</p>
+      </div>
+      <div class="panel" id="teamOwnerPanel">
+        <div class="row">
+          <div class="field"><label for="inviteEmail">Invite by email (optional — leave blank for an open invite)</label><input type="text" id="inviteEmail" placeholder="teammate@example.com"></div>
+        </div>
+        <button class="btn btn-gold" id="createInviteBtn">Create invite code</button>
+        <div class="msg" id="inviteMsg"></div>
+      </div>
+      <div class="panel" id="teamMemberPanel" style="display:none;">
+        <p>You're on <b id="teamOwnerLabel"></b>'s team — campaigns you generate are shared with their workspace.</p>
+      </div>
+      <div class="panel">
+        <h3 style="font-size:1rem;">Join a team</h3>
+        <div class="row">
+          <input type="text" id="joinCodeInput" placeholder="Invite code">
+          <button class="btn btn-line" id="joinTeamBtn">Join</button>
+        </div>
+        <div class="msg" id="joinMsg"></div>
+      </div>
+      <div class="panel">
+        <h3 style="font-size:1rem;">Members</h3>
+        <table><thead><tr><th>Email</th><th>Joined</th><th></th></tr></thead><tbody id="membersBody"></tbody></table>
+        <h3 style="font-size:1rem; margin-top:20px;">Pending invites</h3>
+        <table><thead><tr><th>Code</th><th>Restricted to</th><th>Created</th></tr></thead><tbody id="pendingInvitesBody"></tbody></table>
+      </div>
     </section>
 
     <!-- LICENSE -->
@@ -286,6 +336,8 @@ document.querySelectorAll('nav.side button').forEach(btn => {
     document.getElementById('view-' + btn.dataset.view).classList.add('active');
     if (btn.dataset.view === 'history') loadHistory();
     if (btn.dataset.view === 'voices') loadVoices();
+    if (btn.dataset.view === 'team') loadTeam();
+    if (btn.dataset.view === 'settings') { loadSocialConnections(); loadZapierWebhook(); }
   });
 });
 
@@ -545,10 +597,29 @@ function renderResults(assets, campaignMeta) {
   assets.forEach(a => {
     const card = document.createElement('div');
     card.className = 'result-card';
-    card.innerHTML = `<div class="label">${escapeHtml(a.label)}<button class="copy-btn">Copy</button></div><pre>${escapeHtml(a.content)}</pre>`;
+    const postBtn = (a.platform === 'x' || a.platform === 'linkedin')
+      ? `<button class="copy-btn" data-post="${a.platform}">Post now</button>`
+      : '';
+    card.innerHTML = `<div class="label">${escapeHtml(a.label)}<span><button class="copy-btn">Copy</button> ${postBtn}</span></div><pre>${escapeHtml(a.content)}</pre>`;
     card.querySelector('.copy-btn').addEventListener('click', () => copyText(a.content));
+    const postEl = card.querySelector('button[data-post]');
+    if (postEl) postEl.addEventListener('click', () => postNow(postEl, a.platform, a.content));
     wrap.appendChild(card);
   });
+}
+
+async function postNow(btn, platform, content) {
+  btn.disabled = true; btn.textContent = 'Posting…';
+  try {
+    const res = await fetch(API + 'social-post', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ platform, content }) });
+    const data = await res.json();
+    if (data.success) { btn.textContent = 'Posted ✓'; }
+    else { btn.textContent = 'Post now'; alert(data.error); }
+  } catch (err) {
+    btn.textContent = 'Post now'; alert('Could not reach the server.');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function exportAssets(format) {
@@ -657,6 +728,125 @@ async function duplicateCampaign(id) {
     document.getElementById('genStatus').style.color = 'var(--muted)';
   } catch (err) { /* noop */ }
 }
+
+// ---- Social connections ----
+async function loadSocialConnections() {
+  const wrap = document.getElementById('socialConnections');
+  wrap.innerHTML = 'Loading…';
+  try {
+    const res = await fetch(API + 'social-connections', { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) { wrap.textContent = data.error || 'Could not load.'; return; }
+    const platforms = [
+      { key: 'x', label: 'X / Twitter' },
+      { key: 'linkedin', label: 'LinkedIn' },
+    ];
+    wrap.innerHTML = platforms.map(p => {
+      const conn = data.connections.find(c => c.platform === p.key);
+      if (conn) {
+        return `<div class="status-line" style="margin-bottom:10px;"><span class="dot ok"></span><b style="color:var(--paper); margin-right:6px;">${p.label}</b> connected as ${escapeHtml(conn.account_label || '')} <button class="copy-btn" data-disconnect="${p.key}" style="margin-left:10px;">Disconnect</button></div>`;
+      }
+      return `<div class="status-line" style="margin-bottom:10px;"><span class="dot"></span><b style="color:var(--paper); margin-right:6px;">${p.label}</b> not connected <button class="copy-btn" data-connect="${p.key}" style="margin-left:10px;">Connect</button></div>`;
+    }).join('');
+    wrap.querySelectorAll('button[data-connect]').forEach(b => b.addEventListener('click', () => {
+      const platform = b.dataset.connect;
+      window.location.href = `${API}social-connect-${platform}?token=${encodeURIComponent(token())}`;
+    }));
+    wrap.querySelectorAll('button[data-disconnect]').forEach(b => b.addEventListener('click', async () => {
+      await fetch(API + 'social-connections?platform=' + b.dataset.disconnect, { method: 'DELETE', headers: authHeaders() });
+      loadSocialConnections();
+    }));
+  } catch (err) { wrap.textContent = 'Could not reach the server.'; }
+}
+
+// Show connect/error feedback if we just came back from an OAuth redirect.
+(function checkSocialRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  const connected = params.get('social_connected');
+  const socialError = params.get('social_error');
+  if (connected || socialError) {
+    window.history.replaceState({}, '', window.location.pathname);
+    window.addEventListener('DOMContentLoaded', () => {
+      if (connected) alert(`Connected ${connected === 'x' ? 'X' : 'LinkedIn'} successfully.`);
+      if (socialError) alert('Could not connect: ' + socialError);
+    });
+  }
+})();
+
+// ---- Zapier webhook ----
+async function loadZapierWebhook() {
+  try {
+    const res = await fetch(API + 'zapier-webhook', { headers: authHeaders() });
+    const data = await res.json();
+    if (data.success && data.webhook) document.getElementById('zapierUrlInput').value = data.webhook.url;
+  } catch (err) { /* noop */ }
+}
+document.getElementById('saveZapierBtn').addEventListener('click', async () => {
+  const url = document.getElementById('zapierUrlInput').value.trim();
+  const msg = document.getElementById('zapierMsg');
+  try {
+    const res = await fetch(API + 'zapier-webhook', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ url }) });
+    const data = await res.json();
+    msg.textContent = data.success ? 'Saved.' : data.error;
+    msg.className = data.success ? 'msg ok' : 'msg err';
+  } catch (err) { msg.textContent = 'Could not reach the server.'; msg.className = 'msg err'; }
+});
+document.getElementById('removeZapierBtn').addEventListener('click', async () => {
+  await fetch(API + 'zapier-webhook', { method: 'DELETE', headers: authHeaders() });
+  document.getElementById('zapierUrlInput').value = '';
+  document.getElementById('zapierMsg').textContent = 'Removed.';
+  document.getElementById('zapierMsg').className = 'msg ok';
+});
+
+// ---- Team ----
+async function loadTeam() {
+  if (currentUser.teamOwnerId) {
+    document.getElementById('teamOwnerPanel').style.display = 'none';
+    document.getElementById('teamMemberPanel').style.display = 'block';
+    document.getElementById('teamOwnerLabel').textContent = currentUser.teamOwnerEmail || 'the team owner';
+    return;
+  }
+  try {
+    const res = await fetch(API + 'team-members', { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success) return;
+    document.getElementById('membersBody').innerHTML = data.members.map(m =>
+      `<tr><td>${escapeHtml(m.email)}</td><td>${new Date(m.created_at).toLocaleDateString()}</td><td><button class="copy-btn" data-remove="${m.id}">Remove</button></td></tr>`
+    ).join('') || '<tr><td colspan="3">No team members yet.</td></tr>';
+    document.getElementById('pendingInvitesBody').innerHTML = data.pendingInvites.map(i =>
+      `<tr><td class="mono">${escapeHtml(i.code)}</td><td>${escapeHtml(i.email || 'anyone')}</td><td>${new Date(i.created_at).toLocaleDateString()}</td></tr>`
+    ).join('') || '<tr><td colspan="3">No pending invites.</td></tr>';
+    document.querySelectorAll('button[data-remove]').forEach(b => b.addEventListener('click', async () => {
+      await fetch(API + 'team-members?userId=' + b.dataset.remove, { method: 'DELETE', headers: authHeaders() });
+      loadTeam();
+    }));
+  } catch (err) { /* noop */ }
+}
+document.getElementById('createInviteBtn').addEventListener('click', async () => {
+  const email = document.getElementById('inviteEmail').value.trim();
+  const msg = document.getElementById('inviteMsg');
+  try {
+    const res = await fetch(API + 'team-invite', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ email }) });
+    const data = await res.json();
+    if (data.success) { msg.textContent = 'Invite code: ' + data.code; msg.className = 'msg ok'; loadTeam(); }
+    else { msg.textContent = data.error; msg.className = 'msg err'; }
+  } catch (err) { msg.textContent = 'Could not reach the server.'; msg.className = 'msg err'; }
+});
+document.getElementById('joinTeamBtn').addEventListener('click', async () => {
+  const code = document.getElementById('joinCodeInput').value.trim();
+  const msg = document.getElementById('joinMsg');
+  if (!code) { msg.textContent = 'Enter a code.'; msg.className = 'msg err'; return; }
+  try {
+    const res = await fetch(API + 'team-join', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ code }) });
+    const data = await res.json();
+    if (data.success) {
+      localStorage.setItem('pfai_token', data.token);
+      currentUser = data.user;
+      msg.textContent = 'Joined! Reloading…'; msg.className = 'msg ok';
+      setTimeout(() => window.location.reload(), 1000);
+    } else { msg.textContent = data.error; msg.className = 'msg err'; }
+  } catch (err) { msg.textContent = 'Could not reach the server.'; msg.className = 'msg err'; }
+});
 </script>
 </body>
 </html>

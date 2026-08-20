@@ -1,6 +1,7 @@
 // netlify/functions/campaigns-get.js
 const { query } = require('../../lib/db');
 const { requireAuth } = require('../../lib/auth');
+const { getEffectiveUserId } = require('../../lib/workspace');
 
 exports.handler = async (event) => {
   const payload = requireAuth(event);
@@ -10,7 +11,8 @@ exports.handler = async (event) => {
   if (!id) return { statusCode: 400, body: JSON.stringify({ success: false, error: 'id is required.' }) };
 
   try {
-    const campResult = await query('SELECT * FROM campaigns WHERE id = $1 AND user_id = $2', [id, payload.sub]);
+    const effectiveUserId = await getEffectiveUserId(payload.sub);
+    const campResult = await query('SELECT * FROM campaigns WHERE id = $1 AND user_id = $2', [id, effectiveUserId]);
     const campaign = campResult.rows[0];
     if (!campaign) return { statusCode: 404, body: JSON.stringify({ success: false, error: 'Campaign not found.' }) };
 

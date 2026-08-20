@@ -10,14 +10,19 @@ exports.handler = async (event) => {
     return { statusCode: 401, body: JSON.stringify({ success: false, code: 'NO_SESSION', error: 'Not signed in.' }) };
   }
   try {
-    const result = await query('SELECT id, email, name, tier, is_admin, created_at FROM users WHERE id = $1', [payload.sub]);
+    const result = await query('SELECT id, email, name, tier, is_admin, team_owner_id, created_at FROM users WHERE id = $1', [payload.sub]);
     const user = result.rows[0];
     if (!user) {
       return { statusCode: 401, body: JSON.stringify({ success: false, code: 'NOT_FOUND', error: 'Account no longer exists.' }) };
     }
+    let teamOwnerEmail = null;
+    if (user.team_owner_id) {
+      const ownerResult = await query('SELECT email FROM users WHERE id = $1', [user.team_owner_id]);
+      teamOwnerEmail = ownerResult.rows[0]?.email || null;
+    }
     return {
       statusCode: 200,
-      body: JSON.stringify({ success: true, user: { id: user.id, email: user.email, name: user.name, tier: user.tier, isAdmin: user.is_admin } }),
+      body: JSON.stringify({ success: true, user: { id: user.id, email: user.email, name: user.name, tier: user.tier, isAdmin: user.is_admin, teamOwnerId: user.team_owner_id, teamOwnerEmail } }),
     };
   } catch (err) {
     return { statusCode: 500, body: JSON.stringify({ success: false, error: err.message }) };

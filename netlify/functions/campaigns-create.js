@@ -6,6 +6,22 @@ const { query } = require('../../lib/db');
 const { requireAuth } = require('../../lib/auth');
 const { callProvider } = require('../../lib/ai-provider');
 const { TIERS } = require('../../lib/tiers');
+const { getEffectiveUserId } = require('../../lib/workspace');
+
+async function fireZapierWebhook(userId, campaignPayload) {
+  try {
+    const result = await query('SELECT url FROM zapier_webhooks WHERE user_id = $1', [userId]);
+    const url = result.rows[0]?.url;
+    if (!url) return;
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(campaignPayload),
+    }).catch(() => {}); // fire-and-forget: never let a webhook failure affect the user's response
+  } catch {
+    // never let webhook lookup/delivery failure affect the main response
+  }
+}
 
 const PLATFORM_SPEC = {
   x: 'X/Twitter post — under 280 characters, punchy, max 2 hashtags',
@@ -114,8 +130,12 @@ exports.handler = async (event) => {
   }
 
   try {
+    // Team members share their owner's campaign workspace and quota.
+    const effectiveUserId = await getEffectiveUserId(payload.sub);
+
     // Fresh tier check — never trust the token's cached tier for enforcement.
-    const userRow = await query('SELECT tier FROM users WHERE id = $1', [payload.sub]);
+    // Tier/quota is based on the workspace owner, since that's whose plan pays for it.
+    const userRow = await query('SELECT tier FROM users WHERE id = $1', [effectiveUserId]);
     const tierName = userRow.rows[0]?.tier || 'free';
     const tier = TIERS[tierName] || TIERS.free;
 
@@ -132,13 +152,13 @@ exports.handler = async (event) => {
     }
 
     if (tier.totalCampaignCap != null) {
-      const totalResult = await query('SELECT COUNT(*)::int AS n FROM campaigns WHERE user_id = $1', [payload.sub]);
+      const totalResult = await query('SELECT COUNT(*)::int AS n FROM campaigns WHERE user_id = $1', [effectiveUserId]);
       if (totalResult.rows[0].n >= tier.totalCampaignCap) {
         return { statusCode: 403, body: JSON.stringify({ success: false, code: 'TIER_TOTAL_CAP', error: `Your ${tier.label} plan is limited to ${tier.totalCampaignCap} total campaigns. Upgrade for more.` }) };
       }
     }
     if (tier.dailyCap != null) {
-      const dailyResult = await query("SELECT COUNT(*)::int AS n FROM campaigns WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '1 day'", [payload.sub]);
+      const dailyResult = await query("SELECT COUNT(*)::int AS n FROM campaigns WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '1 day'", [effectiveUserId]);
       if (dailyResult.rows[0].n >= tier.dailyCap) {
         return { statusCode: 403, body: JSON.stringify({ success: false, code: 'TIER_DAILY_CAP', error: `Your ${tier.label} plan is limited to ${tier.dailyCap} campaigns per day. Try again tomorrow or upgrade.` }) };
       }
@@ -182,12 +202,13 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: JSON.stringify({ success: false, code: 'PARSE_FAILED', error: 'The AI response could not be parsed as JSON.', rawText: aiResult.text }) };
     }
 
-    // Persist campaign + assets.
+    // Persist campaign + assets. Stored under the effective workspace owner
+    // so team members and the owner see the same shared campaign history.
     const complianceNotes = Array.isArray(parsed.compliance_notes) ? parsed.compliance_notes : [];
     const campResult = await query(
       `INSERT INTO campaigns (user_id, name, offer_url, target_audience, main_benefit, tone, platforms, asset_modules, language, voice_id, compliance_notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, created_at`,
-      [payload.sub, name, campaign.offerUrl || null, campaign.targetAudience || null, campaign.mainBenefit || null, campaign.tone || 'direct', platforms, modules, language, voice?.id || null, complianceNotes]
+      [effectiveUserId, name, campaign.offerUrl || null, campaign.targetAudience || null, campaign.mainBenefit || null, campaign.tone || 'direct', platforms, modules, language, voice?.id || null, complianceNotes]
     );
     const campaignId = campResult.rows[0].id;
     const assetsToInsert = [];
@@ -227,6 +248,9 @@ exports.handler = async (event) => {
     for (const a of assetsToInsert) {
       await query('INSERT INTO assets (campaign_id, module, platform, label, content) VALUES ($1,$2,$3,$4,$5)', [campaignId, a.module, a.platform, a.label, a.content]);
     }
+
+    // Fire-and-forget: push to Zapier if the workspace owner has a webhook configured.
+    fireZapierWebhook(effectiveUserId, { campaign: { id: campaignId, name, platforms, modules, language }, assets: assetsToInsert });
 
     return {
       statusCode: 200,

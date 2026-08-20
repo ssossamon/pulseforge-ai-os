@@ -1,6 +1,7 @@
 // netlify/functions/campaigns-delete.js
 const { query } = require('../../lib/db');
 const { requireAuth } = require('../../lib/auth');
+const { getEffectiveUserId } = require('../../lib/workspace');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST' && event.httpMethod !== 'DELETE') {
@@ -16,7 +17,8 @@ exports.handler = async (event) => {
   if (!id) return { statusCode: 400, body: JSON.stringify({ success: false, error: 'id is required.' }) };
 
   try {
-    const result = await query('DELETE FROM campaigns WHERE id = $1 AND user_id = $2 RETURNING id', [id, payload.sub]);
+    const effectiveUserId = await getEffectiveUserId(payload.sub);
+    const result = await query('DELETE FROM campaigns WHERE id = $1 AND user_id = $2 RETURNING id', [id, effectiveUserId]);
     if (result.rows.length === 0) return { statusCode: 404, body: JSON.stringify({ success: false, error: 'Campaign not found.' }) };
     return { statusCode: 200, body: JSON.stringify({ success: true }) };
   } catch (err) {
