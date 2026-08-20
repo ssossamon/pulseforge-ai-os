@@ -5,6 +5,7 @@
   "description": "PulseForge AI OS — enterprise campaign builder with accounts, admin keygen, and CRM.",
   "dependencies": {
     "@netlify/database": "^1.1.0",
+    "@netlify/blobs": "^8.1.0",
     "pg": "^8.11.5",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2"

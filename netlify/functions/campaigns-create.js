@@ -7,6 +7,7 @@ const { callProvider } = require('../../lib/ai-provider');
 const { TIERS } = require('../../lib/tiers');
 const { getEffectiveUserId } = require('../../lib/workspace');
 const { buildPrompt, stripFences, assetsFromParsed, persistCampaign, fireZapierWebhook } = require('../../lib/campaign-engine');
+const { generateCampaignImage } = require('../../lib/ai-image');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -22,7 +23,7 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Invalid JSON body.' }) };
   }
 
-  const { provider, apiKey, model, campaign, platforms = [], modules = [], language = 'en', voiceId = null, complianceCheck = false } = body;
+  const { provider, apiKey, model, campaign, platforms = [], modules = [], language = 'en', voiceId = null, complianceCheck = false, imageApiKey = null } = body;
   const name = (campaign?.name || '').trim();
 
   if (!name) return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Campaign name is required.' }) };
@@ -101,7 +102,21 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: JSON.stringify({ success: false, code: 'PARSE_FAILED', error: 'The AI response could not be parsed as JSON.', rawText: aiResult.text }) };
     }
 
-    const { assetsToInsert, complianceNotes } = assetsFromParsed(parsed, complianceCheck);
+    const { assetsToInsert, complianceNotes, imagePrompt } = assetsFromParsed(parsed, complianceCheck);
+
+    if (modules.includes('campaign_image')) {
+      if (!imageApiKey) {
+        assetsToInsert.push({ module: 'campaign_image', platform: null, label: 'Campaign Image', content: 'Skipped — no OpenAI image key set in Settings.' });
+      } else {
+        const imgResult = await generateCampaignImage({ apiKey: imageApiKey, prompt: imagePrompt });
+        if (imgResult.success) {
+          assetsToInsert.push({ module: 'campaign_image', platform: null, label: 'Campaign Image', content: `/.netlify/functions/image?id=${imgResult.imageId}` });
+        } else {
+          assetsToInsert.push({ module: 'campaign_image', platform: null, label: 'Campaign Image', content: `Image generation failed: ${imgResult.error}` });
+        }
+      }
+    }
+
     const { campaignId, createdAt } = await persistCampaign({
       userId: effectiveUserId, name, offerUrl: campaign.offerUrl, targetAudience: campaign.targetAudience,
       mainBenefit: campaign.mainBenefit, tone: campaign.tone, platforms, modules, language,

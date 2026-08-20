@@ -122,6 +122,7 @@
             <label class="chip" data-module="viral_hook"><input type="checkbox" value="viral_hook"> Viral hooks</label>
             <label class="chip" data-module="cta"><input type="checkbox" value="cta"> CTA generator</label>
             <label class="chip" data-module="video_hook"><input type="checkbox" value="video_hook"> Video hooks</label>
+            <label class="chip" data-module="campaign_image"><input type="checkbox" value="campaign_image"> 🎨 AI campaign image</label>
           </div>
         </div>
 
@@ -193,6 +194,10 @@
         </div>
         <div class="field"><label>API key</label><input type="password" id="apiKeyInput" placeholder="sk-..."></div>
         <div class="field"><label>Model</label><select id="modelSelect"></select></div>
+        <div class="field">
+          <label for="imageApiKeyInput">OpenAI image key (for 🎨 AI campaign image)</label>
+          <input type="password" id="imageApiKeyInput" placeholder="sk-... — separate OpenAI key, image generation is OpenAI-only regardless of your text provider">
+        </div>
         <div class="row">
           <button class="btn btn-gold" id="saveSettingsBtn">Save</button>
           <button class="btn btn-line" id="testConnBtn">Test connection</button>
@@ -479,12 +484,14 @@ function loadSettingsIntoForm() {
   populateModels();
   if (s.model) document.getElementById('modelSelect').value = s.model;
   if (s.apiKey) document.getElementById('apiKeyInput').value = s.apiKey;
+  if (s.imageApiKey) document.getElementById('imageApiKeyInput').value = s.imageApiKey;
 }
 document.getElementById('saveSettingsBtn').addEventListener('click', () => {
   store.set('aiSettings', {
     provider: document.getElementById('providerSelect').value,
     model: document.getElementById('modelSelect').value,
-    apiKey: document.getElementById('apiKeyInput').value.trim()
+    apiKey: document.getElementById('apiKeyInput').value.trim(),
+    imageApiKey: document.getElementById('imageApiKeyInput').value.trim()
   });
   document.getElementById('connText').textContent = 'Settings saved — not tested yet';
   document.getElementById('connDot').className = 'dot';
@@ -548,7 +555,7 @@ document.getElementById('autoGenerateBtn').addEventListener('click', async () =>
   try {
     const res = await fetch(API + 'campaigns-auto', {
       method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({ provider: s.provider, apiKey: s.apiKey, model: s.model, input, language, voiceId, complianceCheck })
+      body: JSON.stringify({ provider: s.provider, apiKey: s.apiKey, model: s.model, input, language, voiceId, complianceCheck, imageApiKey: s.imageApiKey, includeImage: !!s.imageApiKey })
     });
     const data = await res.json();
     btn.disabled = false;
@@ -607,7 +614,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
   try {
     const res = await fetch(API + 'campaigns-create', {
       method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({ provider: s.provider, apiKey: s.apiKey, model: s.model, campaign, platforms, modules, language, voiceId, complianceCheck })
+      body: JSON.stringify({ provider: s.provider, apiKey: s.apiKey, model: s.model, campaign, platforms, modules, language, voiceId, complianceCheck, imageApiKey: s.imageApiKey })
     });
     const data = await res.json();
     btn.disabled = false;
@@ -663,6 +670,13 @@ function renderResults(assets, campaignMeta) {
   assets.forEach(a => {
     const card = document.createElement('div');
     card.className = 'result-card';
+
+    if (a.module === 'campaign_image' && a.content.startsWith('/.netlify/functions/image')) {
+      card.innerHTML = `<div class="label">${escapeHtml(a.label)}<a class="copy-btn" href="${a.content}" download="campaign-image.png">Download</a></div><img src="${a.content}" alt="Campaign image" style="max-width:100%; border-radius:6px; display:block;">`;
+      wrap.appendChild(card);
+      return;
+    }
+
     const postBtn = (a.platform === 'x' || a.platform === 'linkedin')
       ? `<button class="copy-btn" data-post="${a.platform}">Post now</button>`
       : '';

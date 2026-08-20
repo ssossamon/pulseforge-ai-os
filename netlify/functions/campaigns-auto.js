@@ -10,6 +10,7 @@ const { callProvider } = require('../../lib/ai-provider');
 const { TIERS } = require('../../lib/tiers');
 const { getEffectiveUserId } = require('../../lib/workspace');
 const { buildPrompt, stripFences, assetsFromParsed, persistCampaign, fireZapierWebhook } = require('../../lib/campaign-engine');
+const { generateCampaignImage } = require('../../lib/ai-image');
 
 const URL_RE = /^https?:\/\/\S+$/i;
 
@@ -56,7 +57,7 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Invalid JSON body.' }) };
   }
 
-  const { provider, apiKey, model, input, language = 'en', voiceId = null, complianceCheck = true } = body;
+  const { provider, apiKey, model, input, language = 'en', voiceId = null, complianceCheck = true, imageApiKey = null } = body;
   const rawInput = (input || '').trim();
   if (!rawInput) return { statusCode: 400, body: JSON.stringify({ success: false, error: 'Paste a URL, product name, or idea first.' }) };
 
@@ -69,7 +70,8 @@ exports.handler = async (event) => {
 
     // One-click mode always requests everything the tier allows.
     const platforms = tier.allowedPlatforms.slice(0, tier.maxPlatforms);
-    const modules = tier.modules;
+    const { includeImage = true } = body;
+    const modules = includeImage ? tier.modules : tier.modules.filter((m) => m !== 'campaign_image');
 
     if (tier.totalCampaignCap != null) {
       const totalResult = await query('SELECT COUNT(*)::int AS n FROM campaigns WHERE user_id = $1', [effectiveUserId]);
@@ -132,7 +134,21 @@ exports.handler = async (event) => {
     const tone = ['direct', 'playful', 'authority', 'story'].includes(brief.tone) ? brief.tone : 'direct';
     const offerUrl = URL_RE.test(rawInput) ? rawInput : null;
 
-    const { assetsToInsert, complianceNotes } = assetsFromParsed(parsed, complianceCheck);
+    const { assetsToInsert, complianceNotes, imagePrompt } = assetsFromParsed(parsed, complianceCheck);
+
+    if (modules.includes('campaign_image')) {
+      if (!imageApiKey) {
+        assetsToInsert.push({ module: 'campaign_image', platform: null, label: 'Campaign Image', content: 'Skipped — no OpenAI image key set in Settings.' });
+      } else {
+        const imgResult = await generateCampaignImage({ apiKey: imageApiKey, prompt: imagePrompt });
+        if (imgResult.success) {
+          assetsToInsert.push({ module: 'campaign_image', platform: null, label: 'Campaign Image', content: `/.netlify/functions/image?id=${imgResult.imageId}` });
+        } else {
+          assetsToInsert.push({ module: 'campaign_image', platform: null, label: 'Campaign Image', content: `Image generation failed: ${imgResult.error}` });
+        }
+      }
+    }
+
     const { campaignId, createdAt } = await persistCampaign({
       userId: effectiveUserId, name, offerUrl, targetAudience, mainBenefit, tone, platforms, modules, language,
       voiceId: voice?.id, complianceNotes, assetsToInsert,
